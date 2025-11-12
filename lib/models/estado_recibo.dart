@@ -1,0 +1,1 @@
+class EstadoRecibo{final int? codEstRec;final String estadoRecibo;EstadoRecibo({this.codEstRec,required this.estadoRecibo});factory EstadoRecibo.fromMap(Map<String,dynamic> m)=>EstadoRecibo(codEstRec:m['cod_est_rec']as int?,estadoRecibo:m['estado_recibo']);Map<String,dynamic> toMap()=>{'cod_est_rec':codEstRec,'estado_recibo':estadoRecibo};}

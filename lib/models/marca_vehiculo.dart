@@ -1,0 +1,1 @@
+class MarcaVehiculo{final int? codMarcaVeh;final String descripcion;MarcaVehiculo({this.codMarcaVeh,required this.descripcion});factory MarcaVehiculo.fromMap(Map<String,dynamic> m)=>MarcaVehiculo(codMarcaVeh:m['cod_marca_veh']as int?,descripcion:m['descripcion']);Map<String,dynamic> toMap()=>{'cod_marca_veh':codMarcaVeh,'descripcion':descripcion};}

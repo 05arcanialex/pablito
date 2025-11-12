@@ -1,0 +1,1 @@
+class Cliente{final int? codCliente;final int codPersona;Cliente({this.codCliente,required this.codPersona});factory Cliente.fromMap(Map<String,dynamic> m)=>Cliente(codCliente:m['cod_clinte']as int?,codPersona:m['cod_persona']);Map<String,dynamic> toMap()=>{'cod_clinte':codCliente,'cod_persona':codPersona};}

@@ -1,0 +1,1 @@
+class TipoTrabajo{final int? codTipoTrabajo;final String? descripcion;TipoTrabajo({this.codTipoTrabajo,this.descripcion});factory TipoTrabajo.fromMap(Map<String,dynamic> m)=>TipoTrabajo(codTipoTrabajo:m['cod_tipo_trabajo']as int?,descripcion:m['descripcion']);Map<String,dynamic> toMap()=>{'cod_tipo_trabajo':codTipoTrabajo,'descripcion':descripcion};}

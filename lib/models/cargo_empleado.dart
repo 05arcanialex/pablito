@@ -1,0 +1,1 @@
+class CargoEmpleado{final int? codCargoEmp;final String descripcion;CargoEmpleado({this.codCargoEmp,required this.descripcion});factory CargoEmpleado.fromMap(Map<String,dynamic> m)=>CargoEmpleado(codCargoEmp:m['cod_cargo_emp']as int?,descripcion:m['descripcion']);Map<String,dynamic> toMap()=>{'cod_cargo_emp':codCargoEmp,'descripcion':descripcion};}
