@@ -13,22 +13,42 @@ class LoginViewModel extends ChangeNotifier {
   static const String demoEmail = "admin@electronicalapaz.com";
   static const String demoPass  = "12345";
 
-  // ———————————————————————————————————————————
-  // Asegura el usuario DEMO (idempotente / sin errores)
-  // ———————————————————————————————————————————
+  // ─────────────────────────────────────────────────────────────
+  // ASEGURA USUARIO DEMO: CREA PERSONA (SI NO EXISTE) Y LUEGO USUARIO
+  // ─────────────────────────────────────────────────────────────
   Future<void> _ensureDemoUser(Database db) async {
-    // UNIQUE(correo) → usa INSERT OR IGNORE para evitar errores
+    // 1) BUSCAR/CREAR PERSONA DEMO
+    int codPersona;
+    final p = await db.query(
+      'persona',
+      columns: ['cod_persona'],
+      where: 'LOWER(email)=LOWER(?)',
+      whereArgs: [demoEmail],
+      limit: 1,
+    );
+    if (p.isEmpty) {
+      codPersona = await db.insert('persona', {
+        'nombre'   : 'ADMIN',
+        'apellidos': 'DEMO',
+        'telefono' : '00000000',
+        'email'    : demoEmail,
+      });
+    } else {
+      codPersona = p.first['cod_persona'] as int;
+    }
+
+    // 2) INSERTAR USUARIO DEMO CON cod_persona (YA NO cod_empleado)
     await db.insert(
       'usuario',
       {
         'nombre_usu'    : 'ADMIN DEMO',
-        'contrasena_usu': demoPass,         // plano para pruebas locales
+        'contrasena_usu': demoPass,     // SOLO PARA PRUEBAS LOCALES
         'correo'        : demoEmail,
         'nivel_acceso'  : 'ADMIN',
         'estado'        : 'ACTIVO',
-        'cod_empleado'  : null,
+        'cod_persona'   : codPersona,   // ← CLAVE CORRECTA
       },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
+      conflictAlgorithm: ConflictAlgorithm.ignore, // IGNORA SI YA EXISTE (UNIQUE correo)
     );
   }
 
@@ -37,22 +57,23 @@ class LoginViewModel extends ChangeNotifier {
     try {
       final db = await _dbHelper.database;
 
-      // 1) Garantiza usuario DEMO
+      // GARANTIZA USUARIO DEMO
       await _ensureDemoUser(db);
 
-      // 2) Si coincide con DEMO → acceso inmediato
-      if (email.trim() == demoEmail && password == demoPass) {
+      // ACCESO DIRECTO A DEMO
+      if (email.trim().toLowerCase() == demoEmail && password == demoPass) {
         return true;
       }
 
-      // 3) Consulta robusta (evita precedence raro)
-      final rows = await db.query(
-        'usuario',
-        columns: ['cod_usuario', 'nombre_usu', 'correo', 'nivel_acceso', 'estado'],
-        where: 'correo = ? AND contrasena_usu = ? AND (estado IS NULL OR estado <> ?)',
-        whereArgs: [email.trim(), password, 'INACTIVO'],
-        limit: 1,
-      );
+      // BÚSQUEDA CON ESTADO ≠ INACTIVO
+      final rows = await db.rawQuery('''
+        SELECT u.cod_usuario, u.nombre_usu, u.correo, u.nivel_acceso, u.estado
+        FROM usuario u
+        WHERE LOWER(u.correo)=LOWER(?)
+          AND u.contrasena_usu=?
+          AND (u.estado IS NULL OR UPPER(u.estado) <> 'INACTIVO')
+        LIMIT 1
+      ''', [email.trim(), password]);
 
       if (rows.isNotEmpty) {
         return true;
@@ -61,7 +82,6 @@ class LoginViewModel extends ChangeNotifier {
         return false;
       }
     } catch (e) {
-      // Mensaje claro y en mayúsculas
       error = 'ERROR DE LOGIN: $e';
       return false;
     } finally {
@@ -69,15 +89,11 @@ class LoginViewModel extends ChangeNotifier {
     }
   }
 
-  // SOS opcional (no toca FKs para evitar ruidos en pruebas)
   Future<void> enviarSOS() async {
     try {
       final db = await _dbHelper.database;
-      // Escribe un log simple en una tabla segura (si quieres crearla)
-      // Por ahora no escribimos nada para no introducir efectos colaterales.
-      // await db.insert('logs', {'tipo':'SOS','fecha':DateTime.now().toIso8601String()});
-    } catch (_) {
-      // Silencioso
-    }
+      // OPCIONAL: GUARDAR LOG DE SOS
+      // await db.insert('logs_sos', {'fecha': DateTime.now().toIso8601String()});
+    } catch (_) {/* SILENCIOSO */}
   }
 }

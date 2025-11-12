@@ -4,11 +4,12 @@ import 'package:provider/provider.dart';
 
 // 🧠 ESTADOS
 import 'viewmodels/dashboard_viewmodel.dart';
+import 'viewmodels/clientes_viewmodel.dart';
 
 // 🎨 CONSTANTES
 import 'utils/constants.dart';
 
-// 🗄 BASE DE DATOS
+// 🗄 BASE DE DATOS  ✅ RUTA CORREGIDA
 import 'models/database_helper.dart';
 
 // 🖥 PANTALLAS
@@ -28,7 +29,7 @@ Future<void> main() async {
     // 🌱 CARGA AUTOMÁTICAMENTE LOS SEEDERS SI LA BD ESTÁ VACÍA
     await DatabaseHelper.instance.seedIfEmpty();
 
-    print('✅ BASE DE DATOS LISTA');
+    debugPrint('✅ BASE DE DATOS LISTA');
   } catch (e) {
     debugPrint('❌ ERROR AL CREAR/ABRIR LA BD: $e');
   }
@@ -44,6 +45,8 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => DashboardViewModel()),
+        // ✅ REGISTRAMOS ClientesViewModel A NIVEL GLOBAL
+        ChangeNotifierProvider(create: (_) => ClientesViewModel()..loadClientes()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

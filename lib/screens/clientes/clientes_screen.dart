@@ -1,50 +1,41 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../utils/constants.dart';
+import '../../viewmodels/clientes_viewmodel.dart';
 
-class ClientesScreen extends StatefulWidget {
+/// WRAPPER A PRUEBA DE FALLOS:
+/// - SI YA EXISTE Provider<ClientesViewModel> ARRIBA, LO USA.
+/// - SI NO EXISTE, INYECTA UNO LOCAL Y CARGA DATOS.
+class ClientesScreen extends StatelessWidget {
   const ClientesScreen({super.key});
 
+  bool _hasProvider(BuildContext context) {
+    try {
+      Provider.of<ClientesViewModel>(context, listen: false);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
-  State<ClientesScreen> createState() => _ClientesScreenState();
+  Widget build(BuildContext context) {
+    if (_hasProvider(context)) return const _ClientesScreenBody();
+    return ChangeNotifierProvider(
+      create: (_) => ClientesViewModel()..loadClientes(),
+      child: const _ClientesScreenBody(),
+    );
+  }
 }
 
-class _ClientesScreenState extends State<ClientesScreen> {
+class _ClientesScreenBody extends StatefulWidget {
+  const _ClientesScreenBody({super.key});
+  @override
+  State<_ClientesScreenBody> createState() => _ClientesScreenBodyState();
+}
+
+class _ClientesScreenBodyState extends State<_ClientesScreenBody> {
   final _searchCtrl = TextEditingController();
-  String _busqueda = '';
-
-  // MOCK: Lista de clientes + vehículos (se reemplaza por API luego)
-  final List<_ClienteRow> _clientes = [
-    _ClienteRow(
-      codCliente: 1,
-      nombre: 'JUAN',
-      apellidos: 'PÉREZ',
-      telefono: '70123456',
-      email: 'juan.perez@example.com',
-      vehiculos: [
-        _VehiculoRow(placa: '1234-ABC', marca: 'TOYOTA', modelo: 'COROLLA', color: 'BLANCO'),
-        _VehiculoRow(placa: '5678-XYZ', marca: 'NISSAN', modelo: 'VERSA', color: 'NEGRO'),
-      ],
-    ),
-    _ClienteRow(
-      codCliente: 2,
-      nombre: 'MARÍA',
-      apellidos: 'LÓPEZ',
-      telefono: '76543210',
-      email: 'maria.lopez@example.com',
-      vehiculos: [
-        _VehiculoRow(placa: '7777-LLL', marca: 'KIA', modelo: 'RIO', color: 'GRIS'),
-      ],
-    ),
-  ];
-
-  List<_ClienteRow> get _filtrados {
-    if (_busqueda.trim().isEmpty) return _clientes;
-    final q = _busqueda.trim().toUpperCase();
-    return _clientes.where((c) {
-      final full = '${c.nombre} ${c.apellidos}'.toUpperCase();
-      return full.contains(q) || (c.email?.toUpperCase().contains(q) ?? false) || (c.telefono?.contains(q) ?? false);
-    }).toList();
-  }
 
   @override
   void dispose() {
@@ -54,11 +45,13 @@ class _ClientesScreenState extends State<ClientesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<ClientesViewModel>();
+
     return Container(
       color: AppColors.background,
       child: Column(
         children: [
-          _buildToolbarResponsive(), // ✅ SIN OVERFLOW
+          _buildToolbarResponsive(vm),
           const SizedBox(height: AppSpacing.medium),
           Expanded(
             child: Padding(
@@ -67,13 +60,11 @@ class _ClientesScreenState extends State<ClientesScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(AppRadius.medium),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
-                  ],
+                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2))],
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadius.medium),
-                  child: _buildTable(),
+                  child: _buildTable(vm),
                 ),
               ),
             ),
@@ -84,9 +75,9 @@ class _ClientesScreenState extends State<ClientesScreen> {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // TOOLBAR RESPONSIVE (BUSCADOR + NUEVO CLIENTE)
+  // TOOLBAR
   // ────────────────────────────────────────────────────────────────────────────
-  Widget _buildToolbarResponsive() {
+  Widget _buildToolbarResponsive(ClientesViewModel vm) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 720;
@@ -101,13 +92,12 @@ class _ClientesScreenState extends State<ClientesScreen> {
 
         final searchBox = ConstrainedBox(
           constraints: BoxConstraints(
-            // OCUPA EL ANCHO DISPONIBLE EN MÓVIL, Y HASTA 420PX EN PANTALLA ANCHA
             maxWidth: isNarrow ? constraints.maxWidth : 420,
             minWidth: 180,
           ),
           child: TextField(
             controller: _searchCtrl,
-            onChanged: (v) => setState(() => _busqueda = v),
+            onChanged: vm.setQuery,
             decoration: InputDecoration(
               isDense: true,
               hintText: 'BUSCAR POR NOMBRE, TELÉFONO O EMAIL',
@@ -123,7 +113,7 @@ class _ClientesScreenState extends State<ClientesScreen> {
         );
 
         final newBtn = ElevatedButton.icon(
-          onPressed: _onCrearCliente,
+          onPressed: () => _onCrearCliente(vm),
           icon: const Icon(Icons.person_add),
           label: const Text('NUEVO CLIENTE'),
           style: ElevatedButton.styleFrom(
@@ -150,10 +140,7 @@ class _ClientesScreenState extends State<ClientesScreen> {
                       spacing: AppSpacing.medium,
                       runSpacing: AppSpacing.small,
                       crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        searchBox,
-                        newBtn,
-                      ],
+                      children: [searchBox, newBtn],
                     ),
                   ],
                 )
@@ -173,16 +160,15 @@ class _ClientesScreenState extends State<ClientesScreen> {
   // ────────────────────────────────────────────────────────────────────────────
   // TABLA
   // ────────────────────────────────────────────────────────────────────────────
-  Widget _buildTable() {
-    final rows = _filtrados;
+  Widget _buildTable(ClientesViewModel vm) {
+    final rows = vm.clientes;
 
     return Scrollbar(
       thumbVisibility: true,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: ConstrainedBox(
-          // ANCHO MÍNIMO PARA QUE LAS COLUMNAS TENGAN ESPACIO SIN CORTARSE
-          constraints: const BoxConstraints(minWidth: 760),
+          constraints: const BoxConstraints(minWidth: 900),
           child: DataTable(
             headingRowColor: MaterialStateProperty.all(AppColors.primary.withOpacity(0.08)),
             dataRowHeight: 56,
@@ -192,80 +178,101 @@ class _ClientesScreenState extends State<ClientesScreen> {
               DataColumn(label: _HeaderText('TELÉFONO')),
               DataColumn(label: _HeaderText('EMAIL')),
               DataColumn(label: _HeaderText('VEHÍCULOS')),
+              DataColumn(label: _HeaderText('ÚLTIMO SERVICIO')),
               DataColumn(label: _HeaderText('ACCIONES')),
             ],
-            rows: rows.map((c) => _buildRow(c)).toList(),
+            rows: rows.map((c) {
+              final ultimo = c.ultimoServicio == null
+                  ? '-'
+                  : '${c.ultimoServicio!.year}-${c.ultimoServicio!.month.toString().padLeft(2, '0')}-${c.ultimoServicio!.day.toString().padLeft(2, '0')}';
+              return DataRow(
+                cells: [
+                  DataCell(Text('${c.codCliente}')),
+                  DataCell(Text(c.nombreCompleto)),
+                  DataCell(Text(c.telefono ?? '-')),
+                  DataCell(Text(c.email ?? '-')),
+                  DataCell(_VehiculosChip(count: c.cantVehiculos, onTap: () => _onVerCliente(vm, c))),
+                  DataCell(Text(ultimo)),
+                  DataCell(Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'VER',
+                        icon: const Icon(Icons.visibility, color: AppColors.secondary),
+                        onPressed: () => _onVerCliente(vm, c),
+                      ),
+                      IconButton(
+                        tooltip: 'EDITAR',
+                        icon: const Icon(Icons.edit, color: AppColors.primary),
+                        onPressed: () => _onEditarCliente(vm, c),
+                      ),
+                      IconButton(
+                        tooltip: 'ELIMINAR',
+                        icon: const Icon(Icons.delete_forever, color: AppColors.accent),
+                        onPressed: () => _onEliminarCliente(vm, c),
+                      ),
+                    ],
+                  )),
+                ],
+              );
+            }).toList(),
           ),
         ),
       ),
     );
   }
 
-  DataRow _buildRow(_ClienteRow c) {
-    final nombre = '${c.nombre} ${c.apellidos}';
-    return DataRow(
-      cells: [
-        DataCell(Text('${c.codCliente}')),
-        DataCell(Text(nombre)),
-        DataCell(Text(c.telefono ?? '-')),
-        DataCell(Text(c.email ?? '-')),
-        DataCell(_VehiculosChip(count: c.vehiculos.length, onTap: () => _onVerCliente(c))),
-        DataCell(Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: 'VER',
-              icon: const Icon(Icons.visibility, color: AppColors.secondary),
-              onPressed: () => _onVerCliente(c),
-            ),
-            IconButton(
-              tooltip: 'EDITAR',
-              icon: const Icon(Icons.edit, color: AppColors.primary),
-              onPressed: () => _onEditarCliente(c),
-            ),
-            IconButton(
-              tooltip: 'ELIMINAR',
-              icon: const Icon(Icons.delete_forever, color: AppColors.accent),
-              onPressed: () => _onEliminarCliente(c),
-            ),
-          ],
-        )),
-      ],
-    );
-  }
-
   // ────────────────────────────────────────────────────────────────────────────
-  // ACCIONES CLIENTE
+  // CRUD CLIENTE
   // ────────────────────────────────────────────────────────────────────────────
-  Future<void> _onCrearCliente() async {
-    final result = await showDialog<_ClienteRow>(
+  Future<void> _onCrearCliente(ClientesViewModel vm) async {
+    final res = await showDialog<_ClienteFormResult>(
       context: context,
-      builder: (_) => _DlgCliente(title: 'REGISTRAR CLIENTE'),
+      builder: (_) => const _DlgCliente(title: 'REGISTRAR CLIENTE'),
     );
-    if (result != null) {
-      setState(() => _clientes.add(result));
+    if (res != null) {
+      await vm.crearCliente(
+        nombre: res.nombre,
+        apellidos: res.apellidos,
+        telefono: res.telefono,
+        email: res.email,
+      );
       _ok('CLIENTE REGISTRADO');
     }
   }
 
-  Future<void> _onEditarCliente(_ClienteRow c) async {
-    final result = await showDialog<_ClienteRow>(
+  Future<void> _onEditarCliente(ClientesViewModel vm, ClienteItem c) async {
+    final res = await showDialog<_ClienteFormResult>(
       context: context,
-      builder: (_) => _DlgCliente(title: 'EDITAR CLIENTE', initial: c),
+      builder: (_) => _DlgCliente(
+        title: 'EDITAR CLIENTE',
+        initial: _ClienteFormResult(
+          nombre: c.nombre,
+          apellidos: c.apellidos,
+          telefono: c.telefono,
+          email: c.email,
+        ),
+      ),
     );
-    if (result != null) {
-      final idx = _clientes.indexWhere((e) => e.codCliente == c.codCliente);
-      if (idx >= 0) setState(() => _clientes[idx] = result.copyWith(codCliente: c.codCliente));
+    if (res != null) {
+      await vm.actualizarCliente(
+        codCliente: c.codCliente,
+        codPersona: c.codPersona,
+        nombre: res.nombre,
+        apellidos: res.apellidos,
+        telefono: res.telefono,
+        email: res.email,
+      );
       _ok('CLIENTE ACTUALIZADO');
     }
   }
 
-  Future<void> _onEliminarCliente(_ClienteRow c) async {
+  Future<void> _onEliminarCliente(ClientesViewModel vm, ClienteItem c) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('ELIMINAR CLIENTE'),
-        content: Text('¿DESEAS ELIMINAR A ${c.nombre} ${c.apellidos}?'),
+        content: Text('¿DESEAS ELIMINAR A ${c.nombreCompleto}?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCELAR')),
           ElevatedButton(
@@ -277,7 +284,7 @@ class _ClientesScreenState extends State<ClientesScreen> {
       ),
     );
     if (ok == true) {
-      setState(() => _clientes.removeWhere((e) => e.codCliente == c.codCliente));
+      await vm.eliminarCliente(codCliente: c.codCliente, codPersona: c.codPersona);
       _ok('CLIENTE ELIMINADO');
     }
   }
@@ -285,35 +292,61 @@ class _ClientesScreenState extends State<ClientesScreen> {
   // ────────────────────────────────────────────────────────────────────────────
   // VER CLIENTE (BOTTOM SHEET) + CRUD VEHÍCULOS
   // ────────────────────────────────────────────────────────────────────────────
-  void _onVerCliente(_ClienteRow c) {
-    showModalBottomSheet(
+  Future<void> _onVerCliente(ClientesViewModel vm, ClienteItem c) async {
+    final vehs = await vm.listarVehiculosDeCliente(c.codCliente);
+
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _BSClienteDetalle(
+      builder: (_) => BSClienteDetalle(
         cliente: c,
-        onAddVehiculo: (v) {
-          setState(() => c.vehiculos.add(v));
+        vehiculos: vehs,
+        onAddVehiculo: (v) async {
+          await vm.crearVehiculo(
+            codCliente: c.codCliente,
+            marca: v.marca,
+            modelo: v.modelo,
+            anio: v.anio,
+            placas: v.placas,
+            color: v.color,
+            kilometraje: v.kilometraje,
+            numeroSerie: v.numeroSerie,
+          );
+          Navigator.pop(context);
+          _onVerCliente(vm, c);
           _ok('VEHÍCULO AGREGADO');
         },
-        onEditVehiculo: (index, v) {
-          setState(() => c.vehiculos[index] = v);
+        onEditVehiculo: (v) async {
+          assert(v.codVehiculo != null, 'codVehiculo NO PUEDE SER NULO AL EDITAR');
+          await vm.actualizarVehiculo(
+            codVehiculo: v.codVehiculo!,
+            marca: v.marca,
+            modelo: v.modelo,
+            anio: v.anio,
+            placas: v.placas,
+            color: v.color,
+            kilometraje: v.kilometraje,
+            numeroSerie: v.numeroSerie,
+          );
+          Navigator.pop(context);
+          _onVerCliente(vm, c);
           _ok('VEHÍCULO ACTUALIZADO');
         },
-        onDeleteVehiculo: (index) {
-          setState(() => c.vehiculos.removeAt(index));
+        onDeleteVehiculo: (codVehiculo) async {
+          await vm.eliminarVehiculo(codVehiculo);
+          Navigator.pop(context);
+          _onVerCliente(vm, c);
           _ok('VEHÍCULO ELIMINADO');
         },
       ),
     );
   }
 
-  void _ok(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
+  void _ok(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -371,20 +404,37 @@ class _VehiculosChip extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// BOTTOM SHEET: DETALLE CLIENTE (DATOS + VEHÍCULOS)
+// BOTTOM SHEET: DETALLE CLIENTE + CRUD VEHÍCULOS
 // ──────────────────────────────────────────────────────────────────────────────
-class _BSClienteDetalle extends StatelessWidget {
-  final _ClienteRow cliente;
-  final void Function(_VehiculoRow) onAddVehiculo;
-  final void Function(int index, _VehiculoRow) onEditVehiculo;
-  final void Function(int index) onDeleteVehiculo;
+class BSClienteDetalle extends StatefulWidget {
+  final ClienteItem cliente;
+  final List<VehiculoItem> vehiculos;
 
-  const _BSClienteDetalle({
+  final Future<void> Function(_VehiculoFormResult nuevo) onAddVehiculo;
+  final Future<void> Function(_VehiculoFormResult editado) onEditVehiculo;
+  final Future<void> Function(int codVehiculo) onDeleteVehiculo;
+
+  const BSClienteDetalle({
+    super.key,
     required this.cliente,
+    required this.vehiculos,
     required this.onAddVehiculo,
     required this.onEditVehiculo,
     required this.onDeleteVehiculo,
   });
+
+  @override
+  State<BSClienteDetalle> createState() => _BSClienteDetalleState();
+}
+
+class _BSClienteDetalleState extends State<BSClienteDetalle> {
+  late List<VehiculoItem> _vehiculos;
+
+  @override
+  void initState() {
+    super.initState();
+    _vehiculos = widget.vehiculos;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -407,72 +457,109 @@ class _BSClienteDetalle extends StatelessWidget {
           const SizedBox(height: AppSpacing.small),
           Align(
             alignment: Alignment.centerLeft,
-            child: Text('${cliente.nombre} ${cliente.apellidos}', style: AppTextStyles.body.copyWith(color: AppColors.textPrimary)),
+            child: Text(widget.cliente.nombreCompleto, style: AppTextStyles.body.copyWith(color: AppColors.textPrimary)),
           ),
           Align(
             alignment: Alignment.centerLeft,
-            child: Text('TEL: ${cliente.telefono ?? '-'}  |  EMAIL: ${cliente.email ?? '-'}', style: AppTextStyles.body),
+            child: Text('TEL: ${widget.cliente.telefono ?? '-'}  |  EMAIL: ${widget.cliente.email ?? '-'}', style: AppTextStyles.body),
           ),
           const SizedBox(height: AppSpacing.medium),
+
           Row(
             children: [
               Expanded(
-                child: Text('VEHÍCULOS (${cliente.vehiculos.length})', style: AppTextStyles.heading2.copyWith(fontWeight: FontWeight.w600)),
+                child: Text('VEHÍCULOS (${_vehiculos.length})',
+                    style: AppTextStyles.heading2.copyWith(fontWeight: FontWeight.w600)),
               ),
               ElevatedButton.icon(
                 onPressed: () async {
-                  final res = await showDialog<_VehiculoRow>(
+                  final res = await showDialog<_VehiculoFormResult>(
                     context: context,
-                    builder: (_) => _DlgVehiculo(title: 'AGREGAR VEHÍCULO'),
+                    builder: (_) => const _DlgVehiculo(title: 'AGREGAR VEHÍCULO'),
                   );
-                  if (res != null) onAddVehiculo(res);
+                  if (res != null) await widget.onAddVehiculo(res);
                 },
                 icon: const Icon(Icons.add),
                 label: const Text('AGREGAR'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.success,
-                  foregroundColor: Colors.white,
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.small),
+
           Flexible(
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemBuilder: (_, i) {
-                final v = cliente.vehiculos[i];
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                  leading: const Icon(Icons.directions_car, color: AppColors.primary),
-                  title: Text('${v.marca} ${v.modelo} (${v.color})'),
-                  subtitle: Text('PLACA: ${v.placa}'),
-                  trailing: Wrap(
-                    spacing: 4,
-                    children: [
-                      IconButton(
-                        tooltip: 'EDITAR',
-                        icon: const Icon(Icons.edit, color: AppColors.primary),
-                        onPressed: () async {
-                          final res = await showDialog<_VehiculoRow>(
-                            context: context,
-                            builder: (_) => _DlgVehiculo(title: 'EDITAR VEHÍCULO', initial: v),
-                          );
-                          if (res != null) onEditVehiculo(i, res);
-                        },
-                      ),
-                      IconButton(
-                        tooltip: 'ELIMINAR',
-                        icon: const Icon(Icons.delete_forever, color: AppColors.accent),
-                        onPressed: () => onDeleteVehiculo(i),
-                      ),
-                    ],
+            child: _vehiculos.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Text('SIN VEHÍCULOS REGISTRADOS'),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemBuilder: (_, i) {
+                      final v = _vehiculos[i];
+                      return Card(
+                        elevation: 1.5,
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          leading: const Icon(Icons.directions_car, color: AppColors.primary),
+                          title: Text('${v.marca} ${v.modelo}${v.anio != null ? ' (${v.anio})' : ''} - ${v.color}'),
+                          subtitle: Text('PLACA: ${v.placas}${v.kilometraje != null ? ' | KM: ${v.kilometraje}' : ''}'),
+                          trailing: Wrap(
+                            spacing: 4,
+                            children: [
+                              IconButton(
+                                tooltip: 'EDITAR',
+                                icon: const Icon(Icons.edit, color: AppColors.primary),
+                                onPressed: () async {
+                                  final res = await showDialog<_VehiculoFormResult>(
+                                    context: context,
+                                    builder: (_) => _DlgVehiculo(
+                                      title: 'EDITAR VEHÍCULO',
+                                      initial: _VehiculoFormResult(
+                                        codVehiculo: v.codVehiculo,
+                                        marca: v.marca,
+                                        modelo: v.modelo,
+                                        anio: v.anio,
+                                        placas: v.placas,
+                                        color: v.color,
+                                        kilometraje: v.kilometraje,
+                                        numeroSerie: v.numeroSerie,
+                                      ),
+                                    ),
+                                  );
+                                  if (res != null) await widget.onEditVehiculo(res);
+                                },
+                              ),
+                              IconButton(
+                                tooltip: 'ELIMINAR',
+                                icon: const Icon(Icons.delete_forever, color: AppColors.accent),
+                                onPressed: () async {
+                                  final ok = await showDialog<bool>(
+                                    context: context,
+                                    builder: (_) => AlertDialog(
+                                      title: const Text('ELIMINAR VEHÍCULO'),
+                                      content: Text('¿Deseas eliminar el vehículo ${v.placas}?'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCELAR')),
+                                        ElevatedButton(
+                                          onPressed: () => Navigator.pop(context, true),
+                                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: Colors.white),
+                                          child: const Text('ELIMINAR'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (ok == true) await widget.onDeleteVehiculo(v.codVehiculo);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    itemCount: _vehiculos.length,
                   ),
-                );
-              },
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemCount: cliente.vehiculos.length,
-            ),
           ),
         ],
       ),
@@ -481,11 +568,20 @@ class _BSClienteDetalle extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// FORMULARIOS (CLIENTE Y VEHÍCULO)
+// ──────────────────────────────────────────────────────────────────────────────
+class _ClienteFormResult {
+  final String nombre;
+  final String apellidos;
+  final String? telefono;
+  final String? email;
+  const _ClienteFormResult({required this.nombre, required this.apellidos, this.telefono, this.email});
+}
+
 class _DlgCliente extends StatefulWidget {
   final String title;
-  final _ClienteRow? initial;
+  final _ClienteFormResult? initial;
   const _DlgCliente({required this.title, this.initial});
-
   @override
   State<_DlgCliente> createState() => _DlgClienteState();
 }
@@ -561,15 +657,15 @@ class _DlgClienteState extends State<_DlgCliente> {
         ElevatedButton(
           onPressed: () {
             if (!_f.currentState!.validate()) return;
-            final nuevo = _ClienteRow(
-              codCliente: widget.initial?.codCliente ?? DateTime.now().millisecondsSinceEpoch,
-              nombre: _nombre.text.trim().toUpperCase(),
-              apellidos: _apellidos.text.trim().toUpperCase(),
-              telefono: _telefono.text.trim().isEmpty ? null : _telefono.text.trim(),
-              email: _email.text.trim().isEmpty ? null : _email.text.trim(),
-              vehiculos: widget.initial?.vehiculos.toList() ?? [],
+            Navigator.pop(
+              context,
+              _ClienteFormResult(
+                nombre: _nombre.text.trim().toUpperCase(),
+                apellidos: _apellidos.text.trim().toUpperCase(),
+                telefono: _telefono.text.trim().isEmpty ? null : _telefono.text.trim(),
+                email: _email.text.trim().isEmpty ? null : _email.text.trim(),
+              ),
             );
-            Navigator.pop(context, nuevo);
           },
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
           child: const Text('GUARDAR'),
@@ -579,10 +675,32 @@ class _DlgClienteState extends State<_DlgCliente> {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
+// RESULT PARA VEHÍCULO (CREAR = ID NULO, EDITAR = ID NO NULO)
+class _VehiculoFormResult {
+  final int? codVehiculo;
+  final String marca;
+  final String modelo;
+  final int? anio;
+  final String placas;
+  final String color;
+  final int? kilometraje;
+  final String? numeroSerie;
+
+  const _VehiculoFormResult({
+    this.codVehiculo,
+    required this.marca,
+    required this.modelo,
+    this.anio,
+    required this.placas,
+    required this.color,
+    this.kilometraje,
+    this.numeroSerie,
+  });
+}
+
 class _DlgVehiculo extends StatefulWidget {
   final String title;
-  final _VehiculoRow? initial;
+  final _VehiculoFormResult? initial;
   const _DlgVehiculo({required this.title, this.initial});
 
   @override
@@ -591,29 +709,38 @@ class _DlgVehiculo extends StatefulWidget {
 
 class _DlgVehiculoState extends State<_DlgVehiculo> {
   final _f = GlobalKey<FormState>();
-  final _placa = TextEditingController();
   final _marca = TextEditingController();
   final _modelo = TextEditingController();
+  final _anio = TextEditingController();
+  final _placa = TextEditingController();
   final _color = TextEditingController();
+  final _km = TextEditingController();
+  final _serie = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     final i = widget.initial;
     if (i != null) {
-      _placa.text = i.placa;
       _marca.text = i.marca;
       _modelo.text = i.modelo;
+      _anio.text = i.anio?.toString() ?? '';
+      _placa.text = i.placas;
       _color.text = i.color;
+      _km.text = i.kilometraje?.toString() ?? '';
+      _serie.text = i.numeroSerie ?? '';
     }
   }
 
   @override
   void dispose() {
-    _placa.dispose();
     _marca.dispose();
     _modelo.dispose();
+    _anio.dispose();
+    _placa.dispose();
     _color.dispose();
+    _km.dispose();
+    _serie.dispose();
     super.dispose();
   }
 
@@ -624,32 +751,67 @@ class _DlgVehiculoState extends State<_DlgVehiculo> {
       content: Form(
         key: _f,
         child: SizedBox(
-          width: 420,
+          width: 460,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextFormField(
-                controller: _placa,
-                decoration: const InputDecoration(labelText: 'PLACA *', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-              ),
+              Row(children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _marca,
+                    decoration: const InputDecoration(labelText: 'MARCA *', border: OutlineInputBorder()),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    controller: _modelo,
+                    decoration: const InputDecoration(labelText: 'MODELO *', border: OutlineInputBorder()),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: AppSpacing.medium),
+              Row(children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _anio,
+                    decoration: const InputDecoration(labelText: 'AÑO', border: OutlineInputBorder()),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    controller: _placa,
+                    decoration: const InputDecoration(labelText: 'PLACA *', border: OutlineInputBorder()),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: AppSpacing.medium),
+              Row(children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _color,
+                    decoration: const InputDecoration(labelText: 'COLOR *', border: OutlineInputBorder()),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    controller: _km,
+                    decoration: const InputDecoration(labelText: 'KILOMETRAJE', border: OutlineInputBorder()),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+              ]),
               const SizedBox(height: AppSpacing.medium),
               TextFormField(
-                controller: _marca,
-                decoration: const InputDecoration(labelText: 'MARCA *', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-              ),
-              const SizedBox(height: AppSpacing.medium),
-              TextFormField(
-                controller: _modelo,
-                decoration: const InputDecoration(labelText: 'MODELO *', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-              ),
-              const SizedBox(height: AppSpacing.medium),
-              TextFormField(
-                controller: _color,
-                decoration: const InputDecoration(labelText: 'COLOR *', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
+                controller: _serie,
+                decoration: const InputDecoration(labelText: 'N° SERIE / VIN', border: OutlineInputBorder()),
               ),
             ],
           ),
@@ -660,13 +822,19 @@ class _DlgVehiculoState extends State<_DlgVehiculo> {
         ElevatedButton(
           onPressed: () {
             if (!_f.currentState!.validate()) return;
-            final v = _VehiculoRow(
-              placa: _placa.text.trim().toUpperCase(),
-              marca: _marca.text.trim().toUpperCase(),
-              modelo: _modelo.text.trim().toUpperCase(),
-              color: _color.text.trim().toUpperCase(),
+            Navigator.pop(
+              context,
+              _VehiculoFormResult(
+                codVehiculo: widget.initial?.codVehiculo,
+                marca: _marca.text.trim().toUpperCase(),
+                modelo: _modelo.text.trim().toUpperCase(),
+                anio: _anio.text.trim().isEmpty ? null : int.tryParse(_anio.text.trim()),
+                placas: _placa.text.trim().toUpperCase(),
+                color: _color.text.trim().toUpperCase(),
+                kilometraje: _km.text.trim().isEmpty ? null : int.tryParse(_km.text.trim()),
+                numeroSerie: _serie.text.trim().isEmpty ? null : _serie.text.trim().toUpperCase(),
+              ),
             );
-            Navigator.pop(context, v);
           },
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
           child: const Text('GUARDAR'),
@@ -674,57 +842,4 @@ class _DlgVehiculoState extends State<_DlgVehiculo> {
       ],
     );
   }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// MODELOS UI (FRONTEND)
-// ──────────────────────────────────────────────────────────────────────────────
-class _ClienteRow {
-  final int codCliente;
-  final String nombre;
-  final String apellidos;
-  final String? telefono;
-  final String? email;
-  final List<_VehiculoRow> vehiculos;
-
-  _ClienteRow({
-    required this.codCliente,
-    required this.nombre,
-    required this.apellidos,
-    this.telefono,
-    this.email,
-    required this.vehiculos,
-  });
-
-  _ClienteRow copyWith({
-    int? codCliente,
-    String? nombre,
-    String? apellidos,
-    String? telefono,
-    String? email,
-    List<_VehiculoRow>? vehiculos,
-  }) {
-    return _ClienteRow(
-      codCliente: codCliente ?? this.codCliente,
-      nombre: nombre ?? this.nombre,
-      apellidos: apellidos ?? this.apellidos,
-      telefono: telefono ?? this.telefono,
-      email: email ?? this.email,
-      vehiculos: vehiculos ?? this.vehiculos,
-    );
-  }
-}
-
-class _VehiculoRow {
-  final String placa;
-  final String marca;
-  final String modelo;
-  final String color;
-
-  _VehiculoRow({
-    required this.placa,
-    required this.marca,
-    required this.modelo,
-    required this.color,
-  });
 }

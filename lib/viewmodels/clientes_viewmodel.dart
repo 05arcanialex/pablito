@@ -1,281 +1,304 @@
 import 'package:flutter/foundation.dart';
-import '../models/database_helper.dart'; // <- ajusta si tu ruta es distinta
+import 'package:sqflite/sqflite.dart';
+// 👇 CORRIGE LA RUTA SEGÚN TU ESTRUCTURA
+import '../models/database_helper.dart';
+/// DTO PARA LA FILA DE CLIENTE EN LISTA
+class ClienteItem {
+  final int codCliente;
+  final int codPersona;
+  final String nombre;
+  final String apellidos;
+  final String? telefono;
+  final String? email;
+  final int cantVehiculos;
+  final DateTime? ultimoServicio;
 
-class MarcaVM {
-  final int id;
-  final String desc;
-  MarcaVM({required this.id, required this.desc});
+  ClienteItem({
+    required this.codCliente,
+    required this.codPersona,
+    required this.nombre,
+    required this.apellidos,
+    required this.telefono,
+    required this.email,
+    required this.cantVehiculos,
+    required this.ultimoServicio,
+  });
+
+  String get nombreCompleto => '${nombre.toUpperCase()} ${apellidos.toUpperCase()}';
 }
 
-class ModeloVM {
-  final int id;
-  final String desc;
-  final int? anio;
-  ModeloVM({required this.id, required this.desc, this.anio});
-}
-
-class VehiculoVM {
+/// DTO PARA VEHÍCULO DETALLE
+class VehiculoItem {
   final int codVehiculo;
   final String placas;
   final String color;
   final int? kilometraje;
+  final String? numeroSerie;
   final String marca;
   final String modelo;
   final int? anio;
-  final String numeroSerie;
 
-  VehiculoVM({
+  VehiculoItem({
     required this.codVehiculo,
     required this.placas,
     required this.color,
     required this.kilometraje,
+    required this.numeroSerie,
     required this.marca,
     required this.modelo,
     required this.anio,
-    required this.numeroSerie,
   });
-
-  factory VehiculoVM.fromRow(Map<String, Object?> r) {
-    int? toInt(dynamic v) => (v == null) ? null : (v is int ? v : int.tryParse(v.toString()));
-    return VehiculoVM(
-      codVehiculo: r['cod_vehiculo'] as int,
-      placas: (r['placas'] ?? '') as String,
-      color: (r['color'] ?? '') as String,
-      kilometraje: toInt(r['kilometraje']),
-      marca: (r['marca'] ?? '') as String,
-      modelo: (r['modelo'] ?? '') as String,
-      anio: toInt(r['anio_modelo']),
-      numeroSerie: (r['numero_serie'] ?? '') as String,
-    );
-  }
 }
 
-class VehiculosClienteViewModel extends ChangeNotifier {
-  final _db = DatabaseHelper.instance;
+/// VIEWMODEL DE CLIENTES
+class ClientesViewModel extends ChangeNotifier {
+  final _dbh = DatabaseHelper.instance;
 
-  final int codCliente;
-  VehiculosClienteViewModel({required this.codCliente});
+  List<ClienteItem> _clientes = [];
+  String _query = '';
 
-  bool _loading = false;
-  String? _error;
-  List<VehiculoVM> _items = [];
-  List<MarcaVM> _marcas = [];
-  List<ModeloVM> _modelos = []; // modelos de la marca seleccionada (cuando aplique)
-
-  bool get loading => _loading;
-  String? get error => _error;
-  List<VehiculoVM> get items => _items;
-  List<MarcaVM> get marcas => _marcas;
-  List<ModeloVM> get modelos => _modelos;
-
-  // ---------------- INIT / LOAD ----------------
-  Future<void> init() async {
-    await _loadMarcas();
-    await load();
+  List<ClienteItem> get clientes {
+    if (_query.trim().isEmpty) return _clientes;
+    final q = _query.trim().toUpperCase();
+    return _clientes.where((c) {
+      final full = '${c.nombre} ${c.apellidos}'.toUpperCase();
+      return full.contains(q) ||
+          (c.email?.toUpperCase().contains(q) ?? false) ||
+          (c.telefono?.contains(q) ?? false);
+    }).toList();
   }
 
-  Future<void> load() async {
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final rows = await _db.rawQuery('''
-        SELECT
-          v.cod_vehiculo,
-          v.placas,
-          v.color,
-          v.kilometraje,
-          v.numero_serie,
-          m.descripcion AS marca,
-          md.descripcion_modelo AS modelo,
-          md.anio_modelo
-        FROM vehiculo v
-        JOIN marca_vehiculo m   ON m.cod_marca_veh  = v.cod_marca_veh
-        JOIN modelo_vehiculo md ON md.cod_modelo_veh = v.cod_modelo_veh
-        WHERE v.cod_cliente = ?
-        ORDER BY v.cod_vehiculo DESC
-      ''', [codCliente]);
-      _items = rows.map(VehiculoVM.fromRow).toList();
-    } catch (e) {
-      _error = 'ERROR AL CARGAR VEHÍCULOS: $e';
-      _items = [];
-    } finally {
-      _loading = false;
-      notifyListeners();
-    }
-  }
+  String get query => _query;
 
-  // ---------------- MARCAS / MODELOS ----------------
-  Future<void> _loadMarcas() async {
-    final rows = await _db.rawQuery('SELECT cod_marca_veh, descripcion FROM marca_vehiculo ORDER BY descripcion');
-    _marcas = rows
-        .map((r) => MarcaVM(id: r['cod_marca_veh'] as int, desc: (r['descripcion'] ?? '') as String))
-        .toList();
+  Future<void> refresh() async => loadClientes();
+
+  void setQuery(String q) {
+    _query = q;
     notifyListeners();
   }
 
-  Future<void> loadModelosByMarca(int codMarca) async {
-    final rows = await _db.rawQuery('''
-      SELECT cod_modelo_veh, descripcion_modelo, anio_modelo
-      FROM modelo_vehiculo
-      WHERE 1=1
-      ORDER BY descripcion_modelo, anio_modelo DESC
-    '''); // si quieres filtrar por marca, agrega relación marca-modelo en tu esquema
-    _modelos = rows
-        .map((r) => ModeloVM(
-              id: r['cod_modelo_veh'] as int,
-              desc: (r['descripcion_modelo'] ?? '') as String,
-              anio: (r['anio_modelo'] is int) ? r['anio_modelo'] as int : int.tryParse('${r['anio_modelo'] ?? ''}'),
-            ))
-        .toList();
-    notifyListeners();
-  }
+  // CARGA DE CLIENTES
+  Future<void> loadClientes() async {
+    final db = await _dbh.database;
+    final rows = await db.rawQuery(r'''
+      SELECT 
+        c.cod_cliente,
+        p.cod_persona,
+        p.nombre,
+        p.apellidos,
+        p.telefono,
+        p.email,
+        IFNULL((
+          SELECT COUNT(*)
+          FROM vehiculo v
+          WHERE v.cod_cliente = c.cod_cliente
+        ), 0) AS cant_vehiculos,
+        (
+          SELECT MAX(rst.fecha_salida)
+          FROM vehiculo v
+          LEFT JOIN registro_servicio_taller rst ON rst.cod_vehiculo = v.cod_vehiculo
+          WHERE v.cod_cliente = c.cod_cliente
+        ) AS ultimo_servicio
+      FROM cliente c
+      JOIN persona p ON p.cod_persona = c.cod_persona
+      ORDER BY p.apellidos COLLATE NOCASE ASC, p.nombre COLLATE NOCASE ASC
+    ''');
 
-  Future<int> _ensureMarca(String descripcion) async {
-    final d = descripcion.trim();
-    if (d.isEmpty) throw 'MARCA VACÍA';
-    final row = await _db.rawQuery('SELECT cod_marca_veh FROM marca_vehiculo WHERE UPPER(descripcion)=UPPER(?) LIMIT 1', [d]);
-    if (row.isNotEmpty) return row.first['cod_marca_veh'] as int;
-    return await _db.rawInsert('INSERT INTO marca_vehiculo(descripcion) VALUES (?)', [d]);
-  }
-
-  Future<int> _ensureModelo(String descripcion, {int? anio}) async {
-    final d = descripcion.trim();
-    if (d.isEmpty) throw 'MODELO VACÍO';
-    final row = await _db.rawQuery(
-      'SELECT cod_modelo_veh FROM modelo_vehiculo WHERE UPPER(descripcion_modelo)=UPPER(?) AND (anio_modelo IS ? OR anio_modelo = ?) LIMIT 1',
-      [d, anio == null ? null : anio, anio],
-    );
-    if (row.isNotEmpty) return row.first['cod_modelo_veh'] as int;
-    return await _db.rawInsert('INSERT INTO modelo_vehiculo(descripcion_modelo, anio_modelo) VALUES (?,?)', [d, anio]);
-  }
-
-  Future<bool> _placaDisponible(String placas, {int? exceptVehiculo}) async {
-    final p = placas.trim().toUpperCase();
-    final rows = await _db.rawQuery(
-      exceptVehiculo == null
-          ? 'SELECT 1 FROM vehiculo WHERE UPPER(placas)=? LIMIT 1'
-          : 'SELECT 1 FROM vehiculo WHERE UPPER(placas)=? AND cod_vehiculo<>? LIMIT 1',
-      exceptVehiculo == null ? [p] : [p, exceptVehiculo],
-    );
-    return rows.isEmpty;
-  }
-
-  // ---------------- CREATE ----------------
-  Future<bool> crearVehiculo({
-    required String placas,
-    required String color,
-    required int? kilometraje,
-    required String numeroSerie,
-    // selección por ID o alta rápida por texto:
-    int? codMarca,
-    int? codModelo,
-    String? marcaNueva,
-    String? modeloNuevo,
-    int? anioModelo,
-  }) async {
-    try {
-      // validaciones
-      if (!await _placaDisponible(placas)) {
-        _error = 'YA EXISTE UN VEHÍCULO CON ESAS PLACAS';
-        notifyListeners();
-        return false;
-      }
-
-      final marcaId = codMarca ?? await _ensureMarca(marcaNueva ?? '');
-      final modeloId = codModelo ?? await _ensureModelo(modeloNuevo ?? '', anio: anioModelo);
-
-      await _db.rawInsert('''
-        INSERT INTO vehiculo(cod_cliente, cod_marca_veh, cod_modelo_veh, kilometraje, placas, numero_serie, color)
-        VALUES (?,?,?,?,?,?,?)
-      ''', [
-        codCliente,
-        marcaId,
-        modeloId,
-        kilometraje ?? 0,
-        placas.trim().toUpperCase(),
-        numeroSerie.trim(),
-        color.trim(),
-      ]);
-
-      await load();
-      return true;
-    } catch (e) {
-      _error = 'NO SE PUDO CREAR: $e';
-      notifyListeners();
-      return false;
-    }
-  }
-
-  // ---------------- UPDATE ----------------
-  Future<bool> editarVehiculo({
-    required int codVehiculo,
-    required String placas,
-    required String color,
-    required int? kilometraje,
-    required String numeroSerie,
-    int? codMarca,
-    int? codModelo,
-    String? marcaNueva,
-    String? modeloNuevo,
-    int? anioModelo,
-  }) async {
-    try {
-      if (!await _placaDisponible(placas, exceptVehiculo: codVehiculo)) {
-        _error = 'YA EXISTE OTRO VEHÍCULO CON ESAS PLACAS';
-        notifyListeners();
-        return false;
-      }
-
-      final marcaId = codMarca ?? await _ensureMarca(marcaNueva ?? '');
-      final modeloId = codModelo ?? await _ensureModelo(modeloNuevo ?? '', anio: anioModelo);
-
-      final n = await _db.rawUpdate('''
-        UPDATE vehiculo
-        SET cod_marca_veh=?, cod_modelo_veh=?, kilometraje=?, placas=?, numero_serie=?, color=?
-        WHERE cod_vehiculo=? AND cod_cliente=?
-      ''', [
-        marcaId,
-        modeloId,
-        kilometraje ?? 0,
-        placas.trim().toUpperCase(),
-        numeroSerie.trim(),
-        color.trim(),
-        codVehiculo,
-        codCliente
-      ]);
-
-      await load();
-      return n > 0;
-    } catch (e) {
-      _error = 'NO SE PUDO EDITAR: $e';
-      notifyListeners();
-      return false;
-    }
-  }
-
-  // ---------------- DELETE ----------------
-  Future<int> contarServiciosAsociados(int codVehiculo) async {
-    final r = await _db.rawQuery(
-      'SELECT COUNT(*) AS c FROM registro_servicio_taller WHERE cod_vehiculo=?',
-      [codVehiculo],
-    );
-    final c = r.isNotEmpty ? (r.first['c'] as int? ?? 0) : 0;
-    return c;
-  }
-
-  Future<bool> eliminarVehiculo(int codVehiculo) async {
-    try {
-      final n = await _db.rawDelete(
-        'DELETE FROM vehiculo WHERE cod_vehiculo=? AND cod_cliente=?',
-        [codVehiculo, codCliente],
+    _clientes = rows.map((r) {
+      final us = r['ultimo_servicio'] as String?;
+      return ClienteItem(
+        codCliente: (r['cod_cliente'] as int),
+        codPersona: (r['cod_persona'] as int),
+        nombre: (r['nombre'] as String),
+        apellidos: (r['apellidos'] as String),
+        telefono: r['telefono'] as String?,
+        email: r['email'] as String?,
+        cantVehiculos: (r['cant_vehiculos'] as int?) ?? 0,
+        ultimoServicio: (us == null || us.isEmpty) ? null : DateTime.tryParse(us),
       );
-      await load();
-      return n > 0;
-    } catch (e) {
-      _error = 'NO SE PUDO ELIMINAR: $e';
-      notifyListeners();
-      return false;
-    }
+    }).toList();
+
+    notifyListeners();
   }
-}                                               
+
+  // CRUD CLIENTE (PERSONA + CLIENTE)
+  Future<int> crearCliente({
+    required String nombre,
+    required String apellidos,
+    String? telefono,
+    String? email,
+  }) async {
+    final db = await _dbh.database;
+    return await db.transaction<int>((txn) async {
+      final codPersona = await txn.insert('persona', {
+        'nombre': nombre.trim().toUpperCase(),
+        'apellidos': apellidos.trim().toUpperCase(),
+        'telefono': (telefono ?? '').trim().isEmpty ? null : telefono!.trim(),
+        'email': (email ?? '').trim().isEmpty ? null : email!.trim(),
+      });
+      final codCliente = await txn.insert('cliente', {
+        'cod_persona': codPersona,
+      });
+      return codCliente;
+    }).whenComplete(loadClientes);
+  }
+
+  Future<void> actualizarCliente({
+    required int codCliente,
+    required int codPersona,
+    required String nombre,
+    required String apellidos,
+    String? telefono,
+    String? email,
+  }) async {
+    final db = await _dbh.database;
+    await db.update(
+      'persona',
+      {
+        'nombre': nombre.trim().toUpperCase(),
+        'apellidos': apellidos.trim().toUpperCase(),
+        'telefono': (telefono ?? '').trim().isEmpty ? null : telefono!.trim(),
+        'email': (email ?? '').trim().isEmpty ? null : email!.trim(),
+      },
+      where: 'cod_persona = ?',
+      whereArgs: [codPersona],
+    );
+    await loadClientes();
+  }
+
+  Future<void> eliminarCliente({
+    required int codCliente,
+    required int codPersona,
+  }) async {
+    final db = await _dbh.database;
+    await db.transaction((txn) async {
+      await txn.delete('cliente', where: 'cod_cliente = ?', whereArgs: [codCliente]);
+      await txn.delete('persona', where: 'cod_persona = ?', whereArgs: [codPersona]);
+    });
+    await loadClientes();
+  }
+
+  // LISTAR VEHÍCULOS POR CLIENTE
+  Future<List<VehiculoItem>> listarVehiculosDeCliente(int codCliente) async {
+    final db = await _dbh.database;
+    final rows = await db.rawQuery(r'''
+      SELECT 
+        v.cod_vehiculo,
+        v.placas,
+        IFNULL(v.color,'') AS color,
+        v.kilometraje,
+        v.numero_serie,
+        m.descripcion AS marca,
+        mo.descripcion_modelo AS modelo,
+        mo.anio_modelo AS anio
+      FROM vehiculo v
+      JOIN marca_vehiculo m ON m.cod_marca_veh = v.cod_marca_veh
+      JOIN modelo_vehiculo mo ON mo.cod_modelo_veh = v.cod_modelo_veh
+      WHERE v.cod_cliente = ?
+      ORDER BY v.cod_vehiculo DESC
+    ''', [codCliente]);
+
+    return rows.map((r) {
+      return VehiculoItem(
+        codVehiculo: r['cod_vehiculo'] as int,
+        placas: (r['placas'] as String),
+        color: (r['color'] as String),
+        kilometraje: r['kilometraje'] as int?,
+        numeroSerie: r['numero_serie'] as String?,
+        marca: (r['marca'] as String),
+        modelo: (r['modelo'] as String),
+        anio: r['anio'] as int?,
+      );
+    }).toList();
+  }
+
+  // HELPERS MARCA/MODELO
+  Future<int> _findOrCreateMarca(DatabaseExecutor db, String descripcion) async {
+    final desc = descripcion.trim().toUpperCase();
+    final hit = await db.query('marca_vehiculo', where: 'descripcion = ?', whereArgs: [desc], limit: 1);
+    if (hit.isNotEmpty) return hit.first['cod_marca_veh'] as int;
+    return await db.insert('marca_vehiculo', {'descripcion': desc});
+  }
+
+  Future<int> _findOrCreateModelo(DatabaseExecutor db, {required String descripcion, int? anio}) async {
+    final desc = descripcion.trim().toUpperCase();
+    final hit = await db.query(
+      'modelo_vehiculo',
+      where: 'descripcion_modelo = ? AND (anio_modelo IS ? OR anio_modelo = ?)',
+      whereArgs: [desc, anio == null ? null : anio, anio ?? 0],
+      limit: 1,
+    );
+    if (hit.isNotEmpty) return hit.first['cod_modelo_veh'] as int;
+    return await db.insert('modelo_vehiculo', {
+      'descripcion_modelo': desc,
+      'anio_modelo': anio,
+    });
+  }
+
+  // CRUD VEHÍCULO
+  Future<int> crearVehiculo({
+    required int codCliente,
+    required String marca,
+    required String modelo,
+    int? anio,
+    required String placas,
+    required String color,
+    int? kilometraje,
+    String? numeroSerie,
+  }) async {
+    final db = await _dbh.database;
+    final id = await db.transaction<int>((txn) async {
+      final codMarca = await _findOrCreateMarca(txn, marca);
+      final codModelo = await _findOrCreateModelo(txn, descripcion: modelo, anio: anio);
+      final codVeh = await txn.insert('vehiculo', {
+        'cod_cliente': codCliente,
+        'cod_marca_veh': codMarca,
+        'cod_modelo_veh': codModelo,
+        'kilometraje': kilometraje,
+        'placas': placas.trim().toUpperCase(),
+        'numero_serie': (numeroSerie ?? '').trim().isEmpty ? null : numeroSerie!.trim().toUpperCase(),
+        'color': color.trim().toUpperCase(),
+      });
+      return codVeh;
+    });
+    await loadClientes();
+    return id;
+  }
+
+  Future<void> actualizarVehiculo({
+    required int codVehiculo,
+    required String marca,
+    required String modelo,
+    int? anio,
+    required String placas,
+    required String color,
+    int? kilometraje,
+    String? numeroSerie,
+  }) async {
+    final db = await _dbh.database;
+    await db.transaction((txn) async {
+      final codMarca = await _findOrCreateMarca(txn, marca);
+      final codModelo = await _findOrCreateModelo(txn, descripcion: modelo, anio: anio);
+      await txn.update(
+        'vehiculo',
+        {
+          'cod_marca_veh': codMarca,
+          'cod_modelo_veh': codModelo,
+          'kilometraje': kilometraje,
+          'placas': placas.trim().toUpperCase(),
+          'numero_serie': (numeroSerie ?? '').trim().isEmpty ? null : numeroSerie!.trim().toUpperCase(),
+          'color': color.trim().toUpperCase(),
+        },
+        where: 'cod_vehiculo = ?',
+        whereArgs: [codVehiculo],
+      );
+    });
+    await loadClientes();
+  }
+
+  Future<void> eliminarVehiculo(int codVehiculo) async {
+    final db = await _dbh.database;
+    await db.delete('vehiculo', where: 'cod_vehiculo = ?', whereArgs: [codVehiculo]);
+    await loadClientes();
+  }
+}

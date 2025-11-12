@@ -382,7 +382,7 @@ class _ServiciosBodyState extends State<_ServiciosBody> {
                     ],
                     onChanged: (v) => setSB(() => tipoSel = v),
                     decoration: const InputDecoration(
-                      labelText: 'TIPO DE TRABAJO (opcional)',
+                      labelText: 'TIPO DE TRABAJO',
                       border: OutlineInputBorder(),
                     ),
                   ),
