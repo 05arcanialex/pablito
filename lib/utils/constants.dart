@@ -12,6 +12,7 @@ class AppColors {
   static const success = Color(0xFF38A169);       // Verde éxito
   static const error = Color(0xFFE53E3E);         // Rojo error
   static const warning = Color(0xFFD69E2E);       // Amarillo advertencia
+  static const info = Color(0xFF3182CE);          // 🔵 Azul informativo (nuevo)
   static const textPrimary = Color(0xFF2D3748);   // Texto principal
   static const textSecondary = Color(0xFF718096); // Texto secundario
 }
@@ -47,6 +48,11 @@ class AppTextStyles {
     fontSize: 16,
     fontWeight: FontWeight.bold,
     color: AppColors.textPrimary,
+  );
+
+  static const bodySmall = TextStyle( // 🆕 añadido
+    fontSize: 13,
+    color: AppColors.textSecondary,
   );
 
   static const caption = TextStyle(

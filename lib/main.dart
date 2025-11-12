@@ -5,16 +5,19 @@ import 'package:provider/provider.dart';
 // 🧠 ESTADOS
 import 'viewmodels/dashboard_viewmodel.dart';
 import 'viewmodels/clientes_viewmodel.dart';
+import 'viewmodels/pagos_viewmodel.dart';
+import 'viewmodels/ubicaciones_viewmodel.dart'; // ⬅️ NUEVO
 
 // 🎨 CONSTANTES
 import 'utils/constants.dart';
 
-// 🗄 BASE DE DATOS  ✅ RUTA CORREGIDA
+// 🗄 BASE DE DATOS
 import 'models/database_helper.dart';
 
 // 🖥 PANTALLAS
 import 'screens/auth/login_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
+import 'screens/pagos/pagos_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,8 +48,9 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => DashboardViewModel()),
-        // ✅ REGISTRAMOS ClientesViewModel A NIVEL GLOBAL
         ChangeNotifierProvider(create: (_) => ClientesViewModel()..loadClientes()),
+        ChangeNotifierProvider(create: (_) => PagosViewModel()..init()),
+        ChangeNotifierProvider(create: (_) => UbicacionesViewModel()), // ⬅️ CLAVE
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -57,6 +61,9 @@ class MyApp extends StatelessWidget {
           scaffoldBackgroundColor: AppColors.background,
         ),
         home: const Root(),
+        routes: {
+          '/pagos': (_) => const PagosScreen(),
+        },
       ),
     );
   }

@@ -97,34 +97,165 @@ class DatabaseHelper {
   }
 
   Future<void> _ensureViews(Database db) async {
-    await db.execute('DROP VIEW IF EXISTS vw_servicios');
-    await db.execute('''
-      CREATE VIEW IF NOT EXISTS vw_servicios AS
-      SELECT
-        rst.cod_ser_taller,
-        rst.fecha_ingreso,
-        rst.fecha_salida,
-        rst.observaciones,
-        v.placas                              AS vehiculo,
-        (p.nombre || ' ' || p.apellidos)      AS cliente,
-        (
+  // Limpieza previa
+  await db.execute('DROP VIEW IF EXISTS vw_historial_all');
+  await db.execute('DROP VIEW IF EXISTS vw_historial_pagos');
+  await db.execute('DROP VIEW IF EXISTS vw_historial_auxilio');
+  await db.execute('DROP VIEW IF EXISTS vw_historial_servicios');
+  await db.execute('DROP VIEW IF EXISTS vw_historial_objetos');
+  await db.execute('DROP VIEW IF EXISTS vw_historial_clientes');
+  await db.execute('DROP VIEW IF EXISTS vw_servicios'); // tu vista antigua
+
+  // ---------- SERVICIOS (TALLER) ----------
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_historial_servicios AS
+    SELECT
+      'SERVICIOS'                            AS modulo,
+      'TALLER'                               AS tipo,
+      ('Serv. Taller #' || rst.cod_ser_taller || ' • ' || v.placas) AS titulo,
+      ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
+        COALESCE(' • Trabajos: ' || (
           SELECT GROUP_CONCAT(tt.descripcion, ', ')
           FROM reg_serv_taller_tipo_trabajo rtt
           JOIN tipo_trabajo tt ON tt.cod_tipo_trabajo = rtt.cod_tipo_trabajo
           WHERE rtt.cod_ser_taller = rst.cod_ser_taller
-        ) AS tipos,
-        COALESCE((
-          SELECT SUM(rtt.costo)
-          FROM reg_serv_taller_tipo_trabajo rtt
-          WHERE rtt.cod_ser_taller = rst.cod_ser_taller
-        ), 0) AS total_aprox,
-        NULL AS estado
-      FROM registro_servicio_taller rst
-      JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
-      JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
-      JOIN persona  p ON p.cod_persona  = c.cod_persona;
-    ''');
-  }
+        ), '')
+      )                                     AS subtitulo,
+      (SELECT COALESCE(SUM(rtt.costo), 0)
+       FROM reg_serv_taller_tipo_trabajo rtt
+       WHERE rtt.cod_ser_taller = rst.cod_ser_taller) AS monto,
+      COALESCE(rst.fecha_salida, rst.fecha_ingreso)    AS fecha_iso,
+      c.cod_cliente                                    AS cod_cliente,
+      'registro_servicio_taller'                       AS ref_table,
+      rst.cod_ser_taller                               AS ref_id
+    FROM registro_servicio_taller rst
+    JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
+    JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
+    JOIN persona  p ON p.cod_persona  = c.cod_persona;
+  ''');
+
+  // ---------- PAGOS (RECIBOS) ----------
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_historial_pagos AS
+    SELECT
+      'PAGOS'                                   AS modulo,
+      'RECIBO'                                  AS tipo,
+      ('Recibo #' || rp.cod_recibo_pago)        AS titulo,
+      ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
+       ' • Estado: ' || er.estado_recibo)       AS subtitulo,
+      rp.total                                   AS monto,
+      rp.fecha                                   AS fecha_iso,
+      rp.cod_cliente                             AS cod_cliente,
+      'recibo_pago'                              AS ref_table,
+      rp.cod_recibo_pago                         AS ref_id
+    FROM recibo_pago rp
+    JOIN cliente c   ON c.cod_cliente   = rp.cod_cliente
+    JOIN persona p   ON p.cod_persona   = c.cod_persona
+    JOIN estado_recibo er ON er.cod_est_rec = rp.cod_est_rec;
+  ''');
+
+  // ---------- AUXILIO MECÁNICO ----------
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_historial_auxilio AS
+    SELECT
+      'AUXILIO'                                   AS modulo,
+      'SOLICITUD'                                 AS tipo,
+      ('Auxilio #' || ram.cod_reg_auxilio)        AS titulo,
+      ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
+       COALESCE(' • Ubicación: ' || ram.ubicacion_cliente, '')) AS subtitulo,
+      NULL                                        AS monto,
+      ram.fecha                                   AS fecha_iso,
+      ram.cod_cliente                             AS cod_cliente,
+      'registro_auxilio_mecanico'                 AS ref_table,
+      ram.cod_reg_auxilio                         AS ref_id
+    FROM registro_auxilio_mecanico ram
+    JOIN cliente c ON c.cod_cliente = ram.cod_cliente
+    JOIN persona p ON p.cod_persona = c.cod_persona;
+  ''');
+
+  // ---------- OBJETOS / INVENTARIO ----------
+  // Nota: no hay columna de fecha en reg_inventario_vehiculo,
+  // usamos CURRENT_TIMESTAMP para poder ordenar/mostrar.
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_historial_objetos AS
+    SELECT
+      'OBJETOS'                                     AS modulo,
+      'INVENTARIO'                                  AS tipo,
+      ('Inventario: ' || iv.descripcion_inv || ' x' || COALESCE(riv.cantidad, 0)) AS titulo,
+      ('Vehículo: ' || v.placas ||
+        COALESCE(' • Estado: ' || riv.estado, '')
+      )                                            AS subtitulo,
+      NULL                                         AS monto,
+      CURRENT_TIMESTAMP                            AS fecha_iso,
+      c.cod_cliente                                AS cod_cliente,
+      'reg_inventario_vehiculo'                    AS ref_table,
+      riv.cod_reg_inv_veh                          AS ref_id
+    FROM reg_inventario_vehiculo riv
+    JOIN inventario_vehiculo iv ON iv.cod_inv_veh = riv.cod_inv_veh
+    JOIN vehiculo v             ON v.cod_vehiculo = riv.cod_vehiculo
+    JOIN cliente  c             ON c.cod_cliente  = v.cod_cliente;
+  ''');
+
+  // ---------- CLIENTES (ALTA / EXISTENTES) ----------
+  // Tampoco hay fechas de creación; usamos CURRENT_TIMESTAMP.
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_historial_clientes AS
+    SELECT
+      'CLIENTES'                                   AS modulo,
+      'REGISTRO'                                   AS tipo,
+      ('Cliente: ' || (p.nombre || ' ' || p.apellidos)) AS titulo,
+      ('Contacto: ' || COALESCE(p.telefono, '-') || ' • ' || COALESCE(p.email, '-')) AS subtitulo,
+      NULL                                         AS monto,
+      CURRENT_TIMESTAMP                            AS fecha_iso,
+      c.cod_cliente                                AS cod_cliente,
+      'cliente'                                    AS ref_table,
+      c.cod_cliente                                AS ref_id
+    FROM cliente c
+    JOIN persona p ON p.cod_persona = c.cod_persona;
+  ''');
+
+  // ---------- VISTA UNIFICADA ----------
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_historial_all AS
+    SELECT * FROM vw_historial_pagos
+    UNION ALL
+    SELECT * FROM vw_historial_auxilio
+    UNION ALL
+    SELECT * FROM vw_historial_servicios
+    UNION ALL
+    SELECT * FROM vw_historial_objetos
+    UNION ALL
+    SELECT * FROM vw_historial_clientes;
+  ''');
+
+  // (Opcional) Tu vista anterior vw_servicios si quieres mantenerla:
+  await db.execute('''
+    CREATE VIEW IF NOT EXISTS vw_servicios AS
+    SELECT
+      rst.cod_ser_taller,
+      rst.fecha_ingreso,
+      rst.fecha_salida,
+      rst.observaciones,
+      v.placas                              AS vehiculo,
+      (p.nombre || ' ' || p.apellidos)      AS cliente,
+      (
+        SELECT GROUP_CONCAT(tt.descripcion, ', ')
+        FROM reg_serv_taller_tipo_trabajo rtt
+        JOIN tipo_trabajo tt ON tt.cod_tipo_trabajo = rtt.cod_tipo_trabajo
+        WHERE rtt.cod_ser_taller = rst.cod_ser_taller
+      ) AS tipos,
+      COALESCE((
+        SELECT SUM(rtt.costo)
+        FROM reg_serv_taller_tipo_trabajo rtt
+        WHERE rtt.cod_ser_taller = rst.cod_ser_taller
+      ), 0) AS total_aprox,
+      NULL AS estado
+    FROM registro_servicio_taller rst
+    JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
+    JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
+    JOIN persona  p ON p.cod_persona  = c.cod_persona;
+  ''');
+}
 
   // ==========================================
   // 🧱 ESTRUCTURA DE TABLAS (DDL)
