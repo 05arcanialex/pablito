@@ -1,13 +1,14 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart'; // ⬅️ AGREGAR ESTA LÍNEA
 
 // 🧠 ESTADOS
 import 'viewmodels/dashboard_viewmodel.dart';
 import 'viewmodels/clientes_viewmodel.dart';
 import 'viewmodels/pagos_viewmodel.dart';
-import 'viewmodels/ubicaciones_viewmodel.dart'; // ⬅️ NUEVO
-import 'viewmodels/login_viewmodel.dart';      // ⬅️ PARA USAR demoEmail
+import 'viewmodels/ubicaciones_viewmodel.dart';
+import 'viewmodels/login_viewmodel.dart';
 
 // 🎨 CONSTANTES
 import 'utils/constants.dart';
@@ -22,6 +23,9 @@ import 'screens/pagos/pagos_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🔥 INICIALIZAR FIREBASE - SOLO ESTA LÍNEA NUEVA
+  await Firebase.initializeApp();
 
   // ❌ EVITA BORRAR DATOS EN CADA EJECUCIÓN
   // await DatabaseHelper.resetDevDB();

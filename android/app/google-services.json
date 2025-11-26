@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "783297749108",
+    "project_id": "electromec-sos-1",
+    "storage_bucket": "electromec-sos-1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:783297749108:android:8ce67b7939882eb1777121",
+        "android_client_info": {
+          "package_name": "com.example.electronics_service"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA54mYwjAI7aJPywfsUIwQVAgH_trMPWFM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

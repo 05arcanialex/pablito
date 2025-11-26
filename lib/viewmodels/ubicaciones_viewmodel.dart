@@ -1,12 +1,21 @@
+// viewmodels/ubicaciones_viewmodel.dart
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart' as geo;
+import 'package:latlong2/latlong.dart';
 import '../models/database_helper.dart';
+import '../services/courier_service.dart' as courier_service;
+import '../services/user_service.dart' as user_service;
+import '../services/rescue_service.dart';
+import '../services/osrm_service.dart';
 
 class UbicacionesViewModel extends ChangeNotifier {
-  final _db = DatabaseHelper.instance;
+  final DatabaseHelper _db = DatabaseHelper.instance;
+  
+  // CORRECCIÓN: Inicializar en el constructor, no con 'late'
+  final user_service.UserService _userService;
+  late final courier_service.CourierService _courierService;
 
   bool _loading = false;
   String? _error;
@@ -24,9 +33,27 @@ class UbicacionesViewModel extends ChangeNotifier {
   // REGISTRO
   int? _codRegistro;
 
-  // CLIENTE AUTO-DETECTADO (SI NO LLEGA CODIGO)
+  // CLIENTE AUTO-DETECTADO
   int? _codClienteSel;
   String? _clienteNombreSel;
+
+  // COURRIER - NUEVAS PROPIEDADES
+  String? _currentRescueId;
+  StreamSubscription<courier_service.RescueRequest>? _rescueSubscription;
+  List<user_service.Vehicle> _userVehicles = [];
+  List<LatLng>? _routePolyline;
+  LatLng? _mechanicLocation;
+
+  // CONSTRUCTOR CORREGIDO
+  UbicacionesViewModel() : _userService = user_service.UserService(DatabaseHelper.instance) {
+    // Inicializar CourierService en el constructor
+    _courierService = courier_service.CourierService(
+      RescueService(),
+      _userService,
+      OSRMService(),
+      _db,
+    );
+  }
 
   // GETTERS
   bool get loading => _loading;
@@ -34,22 +61,32 @@ class UbicacionesViewModel extends ChangeNotifier {
   LatLng? get currentLatLng => _currentLatLng;
   LatLng? get pickedLatLng => _pickedLatLng;
   bool get siguiendo => _siguiendo;
-  String get direccion =>
-      _direccionManual?.trim().isNotEmpty == true ? _direccionManual! : _direccion;
+  String get direccion => _direccionManual?.trim().isNotEmpty == true ? _direccionManual! : _direccion;
   int? get codRegistro => _codRegistro;
   int? get codClienteSel => _codClienteSel;
   String get clienteNombreSel => _clienteNombreSel ?? 'SIN CLIENTE';
+  
+  // COURRIER GETTERS
+  List<user_service.Vehicle> get userVehicles => _userVehicles;
+  List<LatLng>? get routePolyline => _routePolyline;
+  LatLng? get mechanicLocation => _mechanicLocation;
+  String? get currentRescueId => _currentRescueId;
 
-  // ================= INIT =================
+  // ================= INIT CON COURRIER =================
   Future<void> init() async {
     _loading = true;
     _error = null;
     notifyListeners();
 
     try {
+      // ELIMINADO: _initializeServices() - ya no es necesario
+      
       await _ensureAuxilioDDL();
       await _ensurePermisos();
       await _ensureClienteSeleccionado();
+
+      // Cargar vehículos del usuario
+      await _loadUserVehicles();
 
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
@@ -66,13 +103,187 @@ class UbicacionesViewModel extends ChangeNotifier {
     }
   }
 
+  // ELIMINADO: _initializeServices() - ya no es necesario
+
+  Future<void> _loadUserVehicles() async {
+  try {
+    if (_codClienteSel != null) {
+      print('🔍 Cargando vehículos para cliente: $_codClienteSel');
+      _userVehicles = await _userService.getClientVehicles(_codClienteSel!);
+      print('✅ Vehículos cargados: ${_userVehicles.length}');
+    } else {
+      _userVehicles = [];
+      print('⚠️ No hay cliente seleccionado para cargar vehículos');
+    }
+  } catch (e) {
+    print('Error cargando vehículos: $e');
+    _userVehicles = [];
+  }
+}
+
   @override
   void dispose() {
     _posSub?.cancel();
+    _rescueSubscription?.cancel();
+    _courierService.dispose();
     super.dispose();
   }
 
-  // ================= DDL =================
+  // ================= SERVICIOS COURRIER =================
+
+  /// Solicitar auxilio usando el sistema Courrier
+  Future<String> solicitarAuxilioCourrier({
+    required int vehicleId,
+    required String problema,
+  }) async {
+    try {
+      final ubicacion = _pickedLatLng ?? _currentLatLng;
+      if (ubicacion == null) throw Exception('No hay ubicación seleccionada');
+      
+      _loading = true;
+      notifyListeners();
+
+      final rescueId = await _courierService.requestMechanicHelp(
+        vehicleId: vehicleId,
+        problemDescription: problema,
+        location: ubicacion,
+      );
+
+      _currentRescueId = rescueId;
+      
+      // Escuchar actualizaciones del rescate en tiempo real
+      _startRescueListener(rescueId);
+      
+      _loading = false;
+      notifyListeners();
+      
+      return rescueId;
+    } catch (e) {
+      _loading = false;
+      _error = 'Error solicitando auxilio: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  void _startRescueListener(String rescueId) {
+    _rescueSubscription?.cancel();
+    _rescueSubscription = _courierService.getRescueUpdates(rescueId).listen(
+      (rescue) {
+        _handleRescueUpdate(rescue);
+      },
+      onError: (error) {
+        print('Error en stream de rescate: $error');
+        _error = 'Error en seguimiento: $error';
+        notifyListeners();
+      }
+    );
+  }
+
+  void _handleRescueUpdate(courier_service.RescueRequest rescue) {
+    print('Actualización de rescate: ${rescue.status}');
+    
+    // Actualizar ubicación del mecánico
+    if (rescue.mechanicLocation != null) {
+      _mechanicLocation = rescue.mechanicLocation;
+      
+      // Calcular ruta si tenemos ambas ubicaciones
+      if (_currentLatLng != null) {
+        _calculateRouteToMechanic();
+      }
+    }
+    
+    notifyListeners();
+    
+    // Manejar diferentes estados
+    switch (rescue.status) {
+      case courier_service.RescueStatus.accepted:
+        _onRescueAccepted(rescue);
+        break;
+      case courier_service.RescueStatus.enRoute:
+        _onMechanicEnRoute(rescue);
+        break;
+      case courier_service.RescueStatus.arrived:
+        _onMechanicArrived(rescue);
+        break;
+      case courier_service.RescueStatus.completed:
+        _onRescueCompleted(rescue);
+        break;
+      case courier_service.RescueStatus.cancelled:
+        _onRescueCancelled(rescue);
+        break;
+      default:
+        break;
+    }
+  }
+
+  Future<void> _calculateRouteToMechanic() async {
+    if (_currentLatLng == null || _mechanicLocation == null) return;
+    
+    try {
+      _routePolyline = await _courierService.calculateRouteToClient(
+        _mechanicLocation!,
+        _currentLatLng!,
+      );
+      notifyListeners();
+    } catch (e) {
+      print('Error calculando ruta: $e');
+    }
+  }
+
+  void _onRescueAccepted(courier_service.RescueRequest rescue) {
+    print('Mecánico aceptó el rescate: ${rescue.mechanicId}');
+    // Podrías mostrar notificación aquí
+  }
+
+  void _onMechanicEnRoute(courier_service.RescueRequest rescue) {
+    print('Mecánico en camino');
+    // Actualizar UI para mostrar "Mecánico en camino"
+  }
+
+  void _onMechanicArrived(courier_service.RescueRequest rescue) {
+    print('Mecánico llegó a la ubicación');
+    // Mostrar que el mecánico llegó
+  }
+
+  void _onRescueCompleted(courier_service.RescueRequest rescue) {
+    print('Rescate completado');
+    _cleanupRescue();
+  }
+
+  void _onRescueCancelled(courier_service.RescueRequest rescue) {
+    print('Rescate cancelado');
+    _cleanupRescue();
+  }
+
+  void _cleanupRescue() {
+    _currentRescueId = null;
+    _mechanicLocation = null;
+    _routePolyline = null;
+    _rescueSubscription?.cancel();
+    notifyListeners();
+  }
+
+  /// Cancelar rescate actual
+  Future<void> cancelarRescateActual() async {
+    if (_currentRescueId != null) {
+      await _courierService.cancelRescue(_currentRescueId!);
+      _cleanupRescue();
+    }
+  }
+
+  /// Obtener ETA del mecánico
+  Future<Duration?> obtenerETA() async {
+    if (_currentLatLng == null || _mechanicLocation == null) return null;
+    
+    return await _courierService.calculateETA(
+      _mechanicLocation!,
+      _currentLatLng!,
+    );
+  }
+
+  // ================= MÉTODOS EXISTENTES (MANTENIDOS) =================
+  
   Future<void> _ensureAuxilioDDL() async {
     await _db.rawQuery('''
       CREATE TABLE IF NOT EXISTS auxilio_posicion(
@@ -88,7 +299,6 @@ class UbicacionesViewModel extends ChangeNotifier {
     ''');
   }
 
-  // ================= PERMISOS =================
   Future<void> _ensurePermisos() async {
     final service = await Geolocator.isLocationServiceEnabled();
     if (!service) throw 'GPS DESACTIVADO';
@@ -101,7 +311,6 @@ class UbicacionesViewModel extends ChangeNotifier {
     }
   }
 
-  // ================= CLIENTE =================
   Future<void> _ensureClienteSeleccionado() async {
     final rows = await _db.rawQuery('''
       SELECT c.cod_cliente, (p.nombre || ' ' || p.apellidos) AS nombre
@@ -117,7 +326,6 @@ class UbicacionesViewModel extends ChangeNotifier {
       return;
     }
 
-    // CREA UN CLIENTE DEMO SI LA BD ESTÁ VACÍA (EVITA CRASH)
     final idPers = await _db.rawInsert(
       'INSERT INTO persona(nombre, apellidos, telefono, email) VALUES(?,?,?,?)',
       ['CLIENTE', 'DEMO', '70000000', 'demo@example.com'],
@@ -130,7 +338,6 @@ class UbicacionesViewModel extends ChangeNotifier {
     _clienteNombreSel = 'CLIENTE DEMO';
   }
 
-  // ================= STREAM =================
   void _startPosStream() {
     _posSub?.cancel();
     _posSub = Geolocator.getPositionStream(
@@ -159,7 +366,6 @@ class UbicacionesViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ================= UI =================
   Future<void> onDragMarker(LatLng p) async {
     _pickedLatLng = p;
     await _reverseGeocode(p);
@@ -186,7 +392,7 @@ class UbicacionesViewModel extends ChangeNotifier {
     }
   }
 
-  // ================= GUARDAR =================
+  // MÉTODO LEGACY - Mantener para compatibilidad
   Future<bool> confirmarSolicitud({int? codCliente}) async {
     final c = codCliente ?? _codClienteSel;
     if (c == null) {
