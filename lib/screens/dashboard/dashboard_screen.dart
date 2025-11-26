@@ -1,3 +1,4 @@
+// lib/screens/dashboard/dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,7 +6,7 @@ import '../../viewmodels/dashboard_viewmodel.dart';
 import '../../utils/constants.dart';
 
 import '../servicios/servicios_screen.dart';
-import '../clientes/clientes_screen.dart';       // <- LISTA DE CLIENTES
+import '../clientes/clientes_screen.dart';
 import '../ubicaciones/ubicaciones_screen.dart';
 import '../inicio/inicio_screen.dart';
 import '../objetos/objetos_screen.dart';
@@ -13,16 +14,27 @@ import '../pagos/pagos_screen.dart';
 import '../historial/historial_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+  // 👤 DATOS DEL USUARIO ACTUAL
+  final String userName;
+  final String userEmail;
+
+  // 🔚 CALLBACK PARA CERRAR SESIÓN
+  final VoidCallback onLogout;
+
+  const DashboardScreen({
+    super.key,
+    required this.userName,
+    required this.userEmail,
+    required this.onLogout,
+  });
 
   @override
   Widget build(BuildContext context) {
     final dashboardVM = context.watch<DashboardViewModel>();
 
-    // IMPORTANTE: AQUÍ VA ClientesScreen(), NO VehiculosClienteScreen()
     final pages = <Widget>[
       const ServiciosScreen(),       // 0
-      const ClientesScreen(),        // 1 <- DESDE AQUÍ NAVEGAS A VehiculosClienteScreen(...)
+      const ClientesScreen(),        // 1
       const UbicacionesScreen(),     // 2
       InicioScreen(                  // 3
         onQuickAccess: (i) => context.read<DashboardViewModel>().changeIndex(i),
@@ -67,24 +79,39 @@ class DashboardScreen extends StatelessWidget {
         index: dashboardVM.selectedIndex,
         children: pages,
       ),
-      bottomNavigationBar: _buildResponsiveBottomNavigationBar(dashboardVM, context),
+      bottomNavigationBar:
+          _buildResponsiveBottomNavigationBar(dashboardVM, context),
     );
   }
 
   String _titleForIndex(int i) {
     switch (i) {
-      case 0: return "SERVICIOS";
-      case 1: return "CLIENTES";
-      case 2: return "UBICACIONES";
-      case 3: return AppStrings.dashboard;
-      case 4: return "OBJETOS";
-      case 5: return "PAGOS";
-      case 6: return "HISTORIAL";
-      default: return AppStrings.dashboard;
+      case 0:
+        return "SERVICIOS";
+      case 1:
+        return "CLIENTES";
+      case 2:
+        return "UBICACIONES";
+      case 3:
+        return AppStrings.dashboard;
+      case 4:
+        return "OBJETOS";
+      case 5:
+        return "PAGOS";
+      case 6:
+        return "HISTORIAL";
+      default:
+        return AppStrings.dashboard;
     }
   }
 
   Drawer _buildDrawer(BuildContext context, DashboardViewModel dashboardVM) {
+    final displayName =
+        userName.isEmpty ? "USUARIO" : userName; // fallback si viene vacío
+    final displayEmail = userEmail.isEmpty
+        ? "usuario@correo.com"
+        : userEmail; // fallback si viene vacío
+
     return Drawer(
       child: Column(
         children: [
@@ -96,8 +123,14 @@ class DashboardScreen extends StatelessWidget {
                 end: Alignment.bottomRight,
               ),
             ),
-            accountName: Text("USUARIO", style: AppTextStyles.body.copyWith(color: Colors.white)),
-            accountEmail: Text("usuario@correo.com", style: AppTextStyles.body.copyWith(color: Colors.white70)),
+            accountName: Text(
+              displayName,
+              style: AppTextStyles.body.copyWith(color: Colors.white),
+            ),
+            accountEmail: Text(
+              displayEmail,
+              style: AppTextStyles.body.copyWith(color: Colors.white70),
+            ),
             currentAccountPicture: const CircleAvatar(
               radius: 28,
               backgroundColor: AppColors.accent,
@@ -107,18 +140,24 @@ class DashboardScreen extends StatelessWidget {
           _buildDrawerItem(context, Icons.home, "INICIO", 3, dashboardVM),
           _buildDrawerItem(context, Icons.build, "SERVICIOS", 0, dashboardVM),
           _buildDrawerItem(context, Icons.people, "CLIENTES", 1, dashboardVM),
-          _buildDrawerItem(context, Icons.location_on, "UBICACIONES", 2, dashboardVM),
-          _buildDrawerItem(context, Icons.inventory_2, "OBJETOS", 4, dashboardVM),
+          _buildDrawerItem(
+              context, Icons.location_on, "UBICACIONES", 2, dashboardVM),
+          _buildDrawerItem(
+              context, Icons.inventory_2, "OBJETOS", 4, dashboardVM),
           _buildDrawerItem(context, Icons.payments, "PAGOS", 5, dashboardVM),
-          _buildDrawerItem(context, Icons.history, "HISTORIAL", 6, dashboardVM),
+          _buildDrawerItem(
+              context, Icons.history, "HISTORIAL", 6, dashboardVM),
           const Spacer(),
           const Divider(height: 1, color: AppColors.textSecondary),
           ListTile(
             leading: const Icon(Icons.logout, color: AppColors.error),
-            title: Text(AppStrings.logout, style: AppTextStyles.body.copyWith(color: AppColors.error)),
+            title: Text(
+              AppStrings.logout,
+              style: AppTextStyles.body.copyWith(color: AppColors.error),
+            ),
             onTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SESIÓN CERRADA')));
+              Navigator.pop(context); // cierra el drawer
+              onLogout();            // 🔚 AVISA AL ROOT QUE CIERRE SESIÓN
             },
           ),
         ],
@@ -135,7 +174,10 @@ class DashboardScreen extends StatelessWidget {
   ) {
     final isSelected = dashboardVM.selectedIndex == index;
     return ListTile(
-      leading: Icon(icon, color: isSelected ? AppColors.primary : AppColors.textSecondary),
+      leading: Icon(
+        icon,
+        color: isSelected ? AppColors.primary : AppColors.textSecondary,
+      ),
       title: Text(
         label,
         style: AppTextStyles.body.copyWith(
@@ -152,6 +194,9 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
+  // ───────────────────────────────────────────────────
+  // NAV BOTTOM RESPONSIVO (IGUAL QUE TENÍAS)
+  // ───────────────────────────────────────────────────
   Widget _buildResponsiveBottomNavigationBar(
     DashboardViewModel dashboardVM,
     BuildContext context,
@@ -173,7 +218,9 @@ class DashboardScreen extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))],
+        boxShadow: [
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))
+        ],
       ),
       child: SafeArea(
         child: SingleChildScrollView(
@@ -181,13 +228,19 @@ class DashboardScreen extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildNavItem(Icons.build, "SERVICIOS", 0, dashboardVM, isMobile: true),
-              _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM, isMobile: true),
-              _buildNavItem(Icons.location_on, "UBICACIONES", 2, dashboardVM, isMobile: true),
+              _buildNavItem(Icons.build, "SERVICIOS", 0, dashboardVM,
+                  isMobile: true),
+              _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM,
+                  isMobile: true),
+              _buildNavItem(Icons.location_on, "UBICACIONES", 2, dashboardVM,
+                  isMobile: true),
               _buildNavItemInicio(dashboardVM, isMobile: true),
-              _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM, isMobile: true),
-              _buildNavItem(Icons.payments, "PAGOS", 5, dashboardVM, isMobile: true),
-              _buildNavItem(Icons.history, "HISTORIAL", 6, dashboardVM, isMobile: true),
+              _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM,
+                  isMobile: true),
+              _buildNavItem(Icons.payments, "PAGOS", 5, dashboardVM,
+                  isMobile: true),
+              _buildNavItem(Icons.history, "HISTORIAL", 6, dashboardVM,
+                  isMobile: true),
             ],
           ),
         ),
@@ -202,7 +255,9 @@ class DashboardScreen extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))],
+        boxShadow: [
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))
+        ],
       ),
       child: SafeArea(
         child: Container(
@@ -215,9 +270,13 @@ class DashboardScreen extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildNavItem(Icons.build, "SERVICIOS", 0, dashboardVM, isTablet: true),
-                    _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM, isTablet: true),
-                    _buildNavItem(Icons.location_on, "UBICACIONES", 2, dashboardVM, isTablet: true),
+                    _buildNavItem(Icons.build, "SERVICIOS", 0, dashboardVM,
+                        isTablet: true),
+                    _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM,
+                        isTablet: true),
+                    _buildNavItem(Icons.location_on, "UBICACIONES", 2,
+                        dashboardVM,
+                        isTablet: true),
                   ],
                 ),
               ),
@@ -226,9 +285,12 @@ class DashboardScreen extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM, isTablet: true),
-                    _buildNavItem(Icons.payments, "PAGOS", 5, dashboardVM, isTablet: true),
-                    _buildNavItem(Icons.history, "HISTORIAL", 6, dashboardVM, isTablet: true),
+                    _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM,
+                        isTablet: true),
+                    _buildNavItem(Icons.payments, "PAGOS", 5, dashboardVM,
+                        isTablet: true),
+                    _buildNavItem(Icons.history, "HISTORIAL", 6, dashboardVM,
+                        isTablet: true),
                   ],
                 ),
               ),
@@ -246,7 +308,9 @@ class DashboardScreen extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))],
+        boxShadow: [
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))
+        ],
       ),
       child: SafeArea(
         child: Container(
@@ -259,9 +323,13 @@ class DashboardScreen extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildNavItem(Icons.build, "SERVICIOS", 0, dashboardVM, isDesktop: true),
-                    _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM, isDesktop: true),
-                    _buildNavItem(Icons.location_on, "UBICACIONES", 2, dashboardVM, isDesktop: true),
+                    _buildNavItem(Icons.build, "SERVICIOS", 0, dashboardVM,
+                        isDesktop: true),
+                    _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM,
+                        isDesktop: true),
+                    _buildNavItem(Icons.location_on, "UBICACIONES", 2,
+                        dashboardVM,
+                        isDesktop: true),
                   ],
                 ),
               ),
@@ -270,9 +338,12 @@ class DashboardScreen extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM, isDesktop: true),
-                    _buildNavItem(Icons.payments, "PAGOS", 5, dashboardVM, isDesktop: true),
-                    _buildNavItem(Icons.history, "HISTORIAL", 6, dashboardVM, isDesktop: true),
+                    _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM,
+                        isDesktop: true),
+                    _buildNavItem(Icons.payments, "PAGOS", 5, dashboardVM,
+                        isDesktop: true),
+                    _buildNavItem(Icons.history, "HISTORIAL", 6, dashboardVM,
+                        isDesktop: true),
                   ],
                 ),
               ),
@@ -303,7 +374,8 @@ class DashboardScreen extends StatelessWidget {
         children: [
           Icon(
             icon,
-            color: isSelected ? AppColors.primary : AppColors.textSecondary,
+            color:
+                isSelected ? AppColors.primary : AppColors.textSecondary,
             size: isMobile ? 20 : (isTablet ? 24 : 28),
           ),
           const SizedBox(height: 4),
@@ -311,9 +383,12 @@ class DashboardScreen extends StatelessWidget {
             child: Text(
               label,
               style: AppTextStyles.body.copyWith(
-                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                color: isSelected
+                    ? AppColors.primary
+                    : AppColors.textSecondary,
                 fontSize: isMobile ? 10 : (isTablet ? 12 : 14),
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontWeight:
+                    isSelected ? FontWeight.bold : FontWeight.normal,
               ),
               textAlign: TextAlign.center,
               maxLines: isTablet ? 2 : 1,
@@ -343,7 +418,13 @@ class DashboardScreen extends StatelessWidget {
           decoration: BoxDecoration(
             color: isSelected ? AppColors.primary : AppColors.success,
             shape: BoxShape.circle,
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
           ),
           width: isMobile ? 56 : (isTablet ? 64 : 72),
           height: isMobile ? 56 : (isTablet ? 64 : 72),

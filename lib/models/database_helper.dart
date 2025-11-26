@@ -32,11 +32,17 @@ class DatabaseHelper {
       onUpgrade: (db, oldV, newV) async {
         // V1 -> V2: add foto_path a reg_inventario_vehiculo
         if (oldV < 2) {
-          try { await db.execute('ALTER TABLE reg_inventario_vehiculo ADD COLUMN foto_path TEXT'); } catch (_) {}
+          try {
+            await db.execute(
+                'ALTER TABLE reg_inventario_vehiculo ADD COLUMN foto_path TEXT');
+          } catch (_) {}
         }
         // V2 -> V3: add foto_path a inventario_vehiculo
         if (oldV < 3) {
-          try { await db.execute('ALTER TABLE inventario_vehiculo ADD COLUMN foto_path TEXT'); } catch (_) {}
+          try {
+            await db.execute(
+                'ALTER TABLE inventario_vehiculo ADD COLUMN foto_path TEXT');
+          } catch (_) {}
         }
         // V3 -> V4: usuario usa cod_persona (migración segura con copia)
         if (oldV < 4) {
@@ -63,7 +69,7 @@ class DatabaseHelper {
       },
       onOpen: (db) async {
         await _ensureTables(db); // BLINDA TABLAS
-        await _ensureViews(db);  // BLINDA VISTAS
+        await _ensureViews(db); // BLINDA VISTAS
       },
     );
 
@@ -97,165 +103,162 @@ class DatabaseHelper {
   }
 
   Future<void> _ensureViews(Database db) async {
-  // Limpieza previa
-  await db.execute('DROP VIEW IF EXISTS vw_historial_all');
-  await db.execute('DROP VIEW IF EXISTS vw_historial_pagos');
-  await db.execute('DROP VIEW IF EXISTS vw_historial_auxilio');
-  await db.execute('DROP VIEW IF EXISTS vw_historial_servicios');
-  await db.execute('DROP VIEW IF EXISTS vw_historial_objetos');
-  await db.execute('DROP VIEW IF EXISTS vw_historial_clientes');
-  await db.execute('DROP VIEW IF EXISTS vw_servicios'); // tu vista antigua
+    // Limpieza previa
+    await db.execute('DROP VIEW IF EXISTS vw_historial_all');
+    await db.execute('DROP VIEW IF EXISTS vw_historial_pagos');
+    await db.execute('DROP VIEW IF EXISTS vw_historial_auxilio');
+    await db.execute('DROP VIEW IF EXISTS vw_historial_servicios');
+    await db.execute('DROP VIEW IF EXISTS vw_historial_objetos');
+    await db.execute('DROP VIEW IF EXISTS vw_historial_clientes');
+    await db.execute('DROP VIEW IF EXISTS vw_servicios'); // tu vista antigua
 
-  // ---------- SERVICIOS (TALLER) ----------
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_historial_servicios AS
-    SELECT
-      'SERVICIOS'                            AS modulo,
-      'TALLER'                               AS tipo,
-      ('Serv. Taller #' || rst.cod_ser_taller || ' • ' || v.placas) AS titulo,
-      ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
-        COALESCE(' • Trabajos: ' || (
+    // ---------- SERVICIOS (TALLER) ----------
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_historial_servicios AS
+      SELECT
+        'SERVICIOS'                            AS modulo,
+        'TALLER'                               AS tipo,
+        ('Serv. Taller #' || rst.cod_ser_taller || ' • ' || v.placas) AS titulo,
+        ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
+          COALESCE(' • Trabajos: ' || (
+            SELECT GROUP_CONCAT(tt.descripcion, ', ')
+            FROM reg_serv_taller_tipo_trabajo rtt
+            JOIN tipo_trabajo tt ON tt.cod_tipo_trabajo = rtt.cod_tipo_trabajo
+            WHERE rtt.cod_ser_taller = rst.cod_ser_taller
+          ), '')
+        )                                     AS subtitulo,
+        (SELECT COALESCE(SUM(rtt.costo), 0)
+         FROM reg_serv_taller_tipo_trabajo rtt
+         WHERE rtt.cod_ser_taller = rst.cod_ser_taller) AS monto,
+        COALESCE(rst.fecha_salida, rst.fecha_ingreso)    AS fecha_iso,
+        c.cod_cliente                                    AS cod_cliente,
+        'registro_servicio_taller'                       AS ref_table,
+        rst.cod_ser_taller                               AS ref_id
+      FROM registro_servicio_taller rst
+      JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
+      JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
+      JOIN persona  p ON p.cod_persona  = c.cod_persona;
+    ''');
+
+    // ---------- PAGOS (RECIBOS) ----------
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_historial_pagos AS
+      SELECT
+        'PAGOS'                                   AS modulo,
+        'RECIBO'                                  AS tipo,
+        ('Recibo #' || rp.cod_recibo_pago)        AS titulo,
+        ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
+         ' • Estado: ' || er.estado_recibo)       AS subtitulo,
+        rp.total                                   AS monto,
+        rp.fecha                                   AS fecha_iso,
+        rp.cod_cliente                             AS cod_cliente,
+        'recibo_pago'                              AS ref_table,
+        rp.cod_recibo_pago                         AS ref_id
+      FROM recibo_pago rp
+      JOIN cliente c   ON c.cod_cliente   = rp.cod_cliente
+      JOIN persona p   ON p.cod_persona   = c.cod_persona
+      JOIN estado_recibo er ON er.cod_est_rec = rp.cod_est_rec;
+    ''');
+
+    // ---------- AUXILIO MECÁNICO ----------
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_historial_auxilio AS
+      SELECT
+        'AUXILIO'                                   AS modulo,
+        'SOLICITUD'                                 AS tipo,
+        ('Auxilio #' || ram.cod_reg_auxilio)        AS titulo,
+        ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
+         COALESCE(' • Ubicación: ' || ram.ubicacion_cliente, '')) AS subtitulo,
+        NULL                                        AS monto,
+        ram.fecha                                   AS fecha_iso,
+        ram.cod_cliente                             AS cod_cliente,
+        'registro_auxilio_mecanico'                 AS ref_table,
+        ram.cod_reg_auxilio                         AS ref_id
+      FROM registro_auxilio_mecanico ram
+      JOIN cliente c ON c.cod_cliente = ram.cod_cliente
+      JOIN persona p ON p.cod_persona = c.cod_persona;
+    ''');
+
+    // ---------- OBJETOS / INVENTARIO ----------
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_historial_objetos AS
+      SELECT
+        'OBJETOS'                                     AS modulo,
+        'INVENTARIO'                                  AS tipo,
+        ('Inventario: ' || iv.descripcion_inv || ' x' || COALESCE(riv.cantidad, 0)) AS titulo,
+        ('Vehículo: ' || v.placas ||
+          COALESCE(' • Estado: ' || riv.estado, '')
+        )                                            AS subtitulo,
+        NULL                                         AS monto,
+        CURRENT_TIMESTAMP                            AS fecha_iso,
+        c.cod_cliente                                AS cod_cliente,
+        'reg_inventario_vehiculo'                    AS ref_table,
+        riv.cod_reg_inv_veh                          AS ref_id
+      FROM reg_inventario_vehiculo riv
+      JOIN inventario_vehiculo iv ON iv.cod_inv_veh = riv.cod_inv_veh
+      JOIN vehiculo v             ON v.cod_vehiculo = riv.cod_vehiculo
+      JOIN cliente  c             ON c.cod_cliente  = v.cod_cliente;
+    ''');
+
+    // ---------- CLIENTES ----------
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_historial_clientes AS
+      SELECT
+        'CLIENTES'                                   AS modulo,
+        'REGISTRO'                                   AS tipo,
+        ('Cliente: ' || (p.nombre || ' ' || p.apellidos)) AS titulo,
+        ('Contacto: ' || COALESCE(p.telefono, '-') || ' • ' || COALESCE(p.email, '-')) AS subtitulo,
+        NULL                                         AS monto,
+        CURRENT_TIMESTAMP                            AS fecha_iso,
+        c.cod_cliente                                AS cod_cliente,
+        'cliente'                                    AS ref_table,
+        c.cod_cliente                                AS ref_id
+      FROM cliente c
+      JOIN persona p ON p.cod_persona = c.cod_persona;
+    ''');
+
+    // ---------- VISTA UNIFICADA ----------
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_historial_all AS
+      SELECT * FROM vw_historial_pagos
+      UNION ALL
+      SELECT * FROM vw_historial_auxilio
+      UNION ALL
+      SELECT * FROM vw_historial_servicios
+      UNION ALL
+      SELECT * FROM vw_historial_objetos
+      UNION ALL
+      SELECT * FROM vw_historial_clientes;
+    ''');
+
+    // Vista vw_servicios clásica
+    await db.execute('''
+      CREATE VIEW IF NOT EXISTS vw_servicios AS
+      SELECT
+        rst.cod_ser_taller,
+        rst.fecha_ingreso,
+        rst.fecha_salida,
+        rst.observaciones,
+        v.placas                              AS vehiculo,
+        (p.nombre || ' ' || p.apellidos)      AS cliente,
+        (
           SELECT GROUP_CONCAT(tt.descripcion, ', ')
           FROM reg_serv_taller_tipo_trabajo rtt
           JOIN tipo_trabajo tt ON tt.cod_tipo_trabajo = rtt.cod_tipo_trabajo
           WHERE rtt.cod_ser_taller = rst.cod_ser_taller
-        ), '')
-      )                                     AS subtitulo,
-      (SELECT COALESCE(SUM(rtt.costo), 0)
-       FROM reg_serv_taller_tipo_trabajo rtt
-       WHERE rtt.cod_ser_taller = rst.cod_ser_taller) AS monto,
-      COALESCE(rst.fecha_salida, rst.fecha_ingreso)    AS fecha_iso,
-      c.cod_cliente                                    AS cod_cliente,
-      'registro_servicio_taller'                       AS ref_table,
-      rst.cod_ser_taller                               AS ref_id
-    FROM registro_servicio_taller rst
-    JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
-    JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
-    JOIN persona  p ON p.cod_persona  = c.cod_persona;
-  ''');
-
-  // ---------- PAGOS (RECIBOS) ----------
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_historial_pagos AS
-    SELECT
-      'PAGOS'                                   AS modulo,
-      'RECIBO'                                  AS tipo,
-      ('Recibo #' || rp.cod_recibo_pago)        AS titulo,
-      ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
-       ' • Estado: ' || er.estado_recibo)       AS subtitulo,
-      rp.total                                   AS monto,
-      rp.fecha                                   AS fecha_iso,
-      rp.cod_cliente                             AS cod_cliente,
-      'recibo_pago'                              AS ref_table,
-      rp.cod_recibo_pago                         AS ref_id
-    FROM recibo_pago rp
-    JOIN cliente c   ON c.cod_cliente   = rp.cod_cliente
-    JOIN persona p   ON p.cod_persona   = c.cod_persona
-    JOIN estado_recibo er ON er.cod_est_rec = rp.cod_est_rec;
-  ''');
-
-  // ---------- AUXILIO MECÁNICO ----------
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_historial_auxilio AS
-    SELECT
-      'AUXILIO'                                   AS modulo,
-      'SOLICITUD'                                 AS tipo,
-      ('Auxilio #' || ram.cod_reg_auxilio)        AS titulo,
-      ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
-       COALESCE(' • Ubicación: ' || ram.ubicacion_cliente, '')) AS subtitulo,
-      NULL                                        AS monto,
-      ram.fecha                                   AS fecha_iso,
-      ram.cod_cliente                             AS cod_cliente,
-      'registro_auxilio_mecanico'                 AS ref_table,
-      ram.cod_reg_auxilio                         AS ref_id
-    FROM registro_auxilio_mecanico ram
-    JOIN cliente c ON c.cod_cliente = ram.cod_cliente
-    JOIN persona p ON p.cod_persona = c.cod_persona;
-  ''');
-
-  // ---------- OBJETOS / INVENTARIO ----------
-  // Nota: no hay columna de fecha en reg_inventario_vehiculo,
-  // usamos CURRENT_TIMESTAMP para poder ordenar/mostrar.
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_historial_objetos AS
-    SELECT
-      'OBJETOS'                                     AS modulo,
-      'INVENTARIO'                                  AS tipo,
-      ('Inventario: ' || iv.descripcion_inv || ' x' || COALESCE(riv.cantidad, 0)) AS titulo,
-      ('Vehículo: ' || v.placas ||
-        COALESCE(' • Estado: ' || riv.estado, '')
-      )                                            AS subtitulo,
-      NULL                                         AS monto,
-      CURRENT_TIMESTAMP                            AS fecha_iso,
-      c.cod_cliente                                AS cod_cliente,
-      'reg_inventario_vehiculo'                    AS ref_table,
-      riv.cod_reg_inv_veh                          AS ref_id
-    FROM reg_inventario_vehiculo riv
-    JOIN inventario_vehiculo iv ON iv.cod_inv_veh = riv.cod_inv_veh
-    JOIN vehiculo v             ON v.cod_vehiculo = riv.cod_vehiculo
-    JOIN cliente  c             ON c.cod_cliente  = v.cod_cliente;
-  ''');
-
-  // ---------- CLIENTES (ALTA / EXISTENTES) ----------
-  // Tampoco hay fechas de creación; usamos CURRENT_TIMESTAMP.
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_historial_clientes AS
-    SELECT
-      'CLIENTES'                                   AS modulo,
-      'REGISTRO'                                   AS tipo,
-      ('Cliente: ' || (p.nombre || ' ' || p.apellidos)) AS titulo,
-      ('Contacto: ' || COALESCE(p.telefono, '-') || ' • ' || COALESCE(p.email, '-')) AS subtitulo,
-      NULL                                         AS monto,
-      CURRENT_TIMESTAMP                            AS fecha_iso,
-      c.cod_cliente                                AS cod_cliente,
-      'cliente'                                    AS ref_table,
-      c.cod_cliente                                AS ref_id
-    FROM cliente c
-    JOIN persona p ON p.cod_persona = c.cod_persona;
-  ''');
-
-  // ---------- VISTA UNIFICADA ----------
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_historial_all AS
-    SELECT * FROM vw_historial_pagos
-    UNION ALL
-    SELECT * FROM vw_historial_auxilio
-    UNION ALL
-    SELECT * FROM vw_historial_servicios
-    UNION ALL
-    SELECT * FROM vw_historial_objetos
-    UNION ALL
-    SELECT * FROM vw_historial_clientes;
-  ''');
-
-  // (Opcional) Tu vista anterior vw_servicios si quieres mantenerla:
-  await db.execute('''
-    CREATE VIEW IF NOT EXISTS vw_servicios AS
-    SELECT
-      rst.cod_ser_taller,
-      rst.fecha_ingreso,
-      rst.fecha_salida,
-      rst.observaciones,
-      v.placas                              AS vehiculo,
-      (p.nombre || ' ' || p.apellidos)      AS cliente,
-      (
-        SELECT GROUP_CONCAT(tt.descripcion, ', ')
-        FROM reg_serv_taller_tipo_trabajo rtt
-        JOIN tipo_trabajo tt ON tt.cod_tipo_trabajo = rtt.cod_tipo_trabajo
-        WHERE rtt.cod_ser_taller = rst.cod_ser_taller
-      ) AS tipos,
-      COALESCE((
-        SELECT SUM(rtt.costo)
-        FROM reg_serv_taller_tipo_trabajo rtt
-        WHERE rtt.cod_ser_taller = rst.cod_ser_taller
-      ), 0) AS total_aprox,
-      NULL AS estado
-    FROM registro_servicio_taller rst
-    JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
-    JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
-    JOIN persona  p ON p.cod_persona  = c.cod_persona;
-  ''');
-}
+        ) AS tipos,
+        COALESCE((
+          SELECT SUM(rtt.costo)
+          FROM reg_serv_taller_tipo_trabajo rtt
+          WHERE rtt.cod_ser_taller = rst.cod_ser_taller
+        ), 0) AS total_aprox,
+        NULL AS estado
+      FROM registro_servicio_taller rst
+      JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
+      JOIN cliente  c ON c.cod_cliente  = v.cod_cliente
+      JOIN persona  p ON p.cod_persona  = c.cod_persona;
+    ''');
+  }
 
   // ==========================================
   // 🧱 ESTRUCTURA DE TABLAS (DDL)
@@ -470,7 +473,6 @@ class DatabaseHelper {
 
   // =============== MIGRACIÓN V4: usuario -> cod_persona ===============
   Future<void> _migrateUsuarioToCodPersona(Database db) async {
-    // 1) crear tabla temporal con el nuevo esquema
     await db.execute('''
       CREATE TABLE IF NOT EXISTS usuario_tmp(
         cod_usuario    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -485,7 +487,6 @@ class DatabaseHelper {
       );
     ''');
 
-    // 2) copiar datos: derivar cod_persona desde empleado.cod_persona
     await db.execute('''
       INSERT OR IGNORE INTO usuario_tmp
       (cod_usuario, nombre_usu, contrasena_usu, correo, nivel_acceso, estado, cod_persona)
@@ -495,7 +496,6 @@ class DatabaseHelper {
       LEFT JOIN empleado e ON e.cod_empleado = u.cod_empleado
     ''');
 
-    // 3) eliminar tabla antigua y renombrar
     await db.execute('DROP TABLE IF EXISTS usuario;');
     await db.execute('ALTER TABLE usuario_tmp RENAME TO usuario;');
   }
@@ -516,7 +516,8 @@ class DatabaseHelper {
   // ✅ SOLO CARGA DEMO SI ESTÁ VACÍA
   Future<bool> _isEmptyForDemo(Database db) async {
     final r1 = await db.rawQuery('SELECT COUNT(*) AS c FROM cliente');
-    final r2 = await db.rawQuery('SELECT COUNT(*) AS c FROM registro_servicio_taller');
+    final r2 =
+        await db.rawQuery('SELECT COUNT(*) AS c FROM registro_servicio_taller');
     final c1 = (r1.isNotEmpty ? (r1.first['c'] as int?) : 0) ?? 0;
     final c2 = (r2.isNotEmpty ? (r2.first['c'] as int?) : 0) ?? 0;
     return (c1 == 0 || c2 == 0);
@@ -539,112 +540,580 @@ class DatabaseHelper {
     print('🚀 INICIANDO SEED DEMO COMPLETO...');
 
     // 1) CARGOS
-    final idCargoMec = await db.insert('cargo_empleado', {'descripcion': 'MECÁNICO'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idCargoAdm = await db.insert('cargo_empleado', {'descripcion': 'ADMINISTRADOR'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idCargoTec = await db.insert('cargo_empleado', {'descripcion': 'TÉCNICO DIAGNOSTICADOR'}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final idCargoMec = await db.insert(
+      'cargo_empleado',
+      {'descripcion': 'MECÁNICO'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCargoAdm = await db.insert(
+      'cargo_empleado',
+      {'descripcion': 'ADMINISTRADOR'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCargoTec = await db.insert(
+      'cargo_empleado',
+      {'descripcion': 'TÉCNICO DIAGNOSTICADOR'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    // 2) PERSONAS
-    final idPers1 = await db.insert('persona', {'nombre': 'Juan', 'apellidos': 'Pérez López', 'telefono': '77788899', 'email': 'juan@example.com'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idPers2 = await db.insert('persona', {'nombre': 'Ramiro', 'apellidos': 'Arcani Condori', 'telefono': '76543210', 'email': 'ramiro@example.com'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idPers3 = await db.insert('persona', {'nombre': 'Alex', 'apellidos': 'Arcani Gutiérrez', 'telefono': '60123456', 'email': 'alex@example.com'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idPers4 = await db.insert('persona', {'nombre': 'Carla', 'apellidos': 'Mendoza Vargas', 'telefono': '70654321', 'email': 'carla@example.com'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idPers5 = await db.insert('persona', {'nombre': 'Luis', 'apellidos': 'Torrez Nina', 'telefono': '78945612', 'email': 'luis@example.com'}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 2) PERSONAS (EMPLEADOS + CLIENTES)
+    final idPers1 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Juan',
+        'apellidos': 'Pérez López',
+        'telefono': '77788899',
+        'email': 'juan@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers2 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Ramiro',
+        'apellidos': 'Arcani Condori',
+        'telefono': '76543210',
+        'email': 'ramiro@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers3 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Alex',
+        'apellidos': 'Arcani Gutiérrez',
+        'telefono': '60123456',
+        'email': 'alex@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers4 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Carla',
+        'apellidos': 'Mendoza Vargas',
+        'telefono': '70654321',
+        'email': 'carla@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers5 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Luis',
+        'apellidos': 'Torrez Nina',
+        'telefono': '78945612',
+        'email': 'luis@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers6 = await db.insert(
+      'persona',
+      {
+        'nombre': 'María',
+        'apellidos': 'Gómez Rojas',
+        'telefono': '70111222',
+        'email': 'maria@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers7 = await db.insert(
+      'persona',
+      {
+        'nombre': 'José',
+        'apellidos': 'Quispe Flores',
+        'telefono': '70333444',
+        'email': 'jose@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers8 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Patricia',
+        'apellidos': 'Vargas Soto',
+        'telefono': '70555666',
+        'email': 'patricia@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idPers9 = await db.insert(
+      'persona',
+      {
+        'nombre': 'Miguel',
+        'apellidos': 'López Aguilar',
+        'telefono': '70777888',
+        'email': 'miguel@example.com',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    // 3) CLIENTES Y EMPLEADOS
-    final idCliente1 = await db.insert('cliente', {'cod_persona': idPers1}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idCliente2 = await db.insert('cliente', {'cod_persona': idPers4}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idCliente3 = await db.insert('cliente', {'cod_persona': idPers5}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 3) CLIENTES
+    final idCliente1 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers1},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCliente2 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers4},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCliente3 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers5},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCliente4 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers6},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCliente5 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers7},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCliente6 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers8},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCliente7 = await db.insert(
+      'cliente',
+      {'cod_persona': idPers9},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    final idEmpMec = await db.insert('empleado', {'cod_persona': idPers2, 'cod_cargo_emp': idCargoMec}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idEmpAdm = await db.insert('empleado', {'cod_persona': idPers3, 'cod_cargo_emp': idCargoAdm}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idEmpTec = await db.insert('empleado', {'cod_persona': idPers4, 'cod_cargo_emp': idCargoTec}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 4) EMPLEADOS
+    final idEmpMec = await db.insert(
+      'empleado',
+      {
+        'cod_persona': idPers2,
+        'cod_cargo_emp': idCargoMec,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idEmpAdm = await db.insert(
+      'empleado',
+      {
+        'cod_persona': idPers3,
+        'cod_cargo_emp': idCargoAdm,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idEmpTec = await db.insert(
+      'empleado',
+      {
+        'cod_persona': idPers4,
+        'cod_cargo_emp': idCargoTec,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    // 4) MARCAS Y MODELOS
-    final idToyota = await db.insert('marca_vehiculo', {'descripcion': 'TOYOTA'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idNissan = await db.insert('marca_vehiculo', {'descripcion': 'NISSAN'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idHyundai = await db.insert('marca_vehiculo', {'descripcion': 'HYUNDAI'}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 5) MARCAS Y MODELOS
+    final idToyota = await db.insert(
+      'marca_vehiculo',
+      {'descripcion': 'TOYOTA'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idNissan = await db.insert(
+      'marca_vehiculo',
+      {'descripcion': 'NISSAN'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idHyundai = await db.insert(
+      'marca_vehiculo',
+      {'descripcion': 'HYUNDAI'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idChevrolet = await db.insert(
+      'marca_vehiculo',
+      {'descripcion': 'CHEVROLET'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idKia = await db.insert(
+      'marca_vehiculo',
+      {'descripcion': 'KIA'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    final idHilux  = await db.insert('modelo_vehiculo', {'anio_modelo': 2020, 'descripcion_modelo': 'HILUX'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idSentra = await db.insert('modelo_vehiculo', {'anio_modelo': 2018, 'descripcion_modelo': 'SENTRA'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idTucson = await db.insert('modelo_vehiculo', {'anio_modelo': 2021, 'descripcion_modelo': 'TUCSON'}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final idHilux = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2020, 'descripcion_modelo': 'HILUX'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idSentra = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2018, 'descripcion_modelo': 'SENTRA'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idTucson = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2021, 'descripcion_modelo': 'TUCSON'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idCorolla = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2019, 'descripcion_modelo': 'COROLLA'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idRio = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2017, 'descripcion_modelo': 'RIO'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idOnix = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2022, 'descripcion_modelo': 'ONIX'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idElantra = await db.insert(
+      'modelo_vehiculo',
+      {'anio_modelo': 2020, 'descripcion_modelo': 'ELANTRA'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    // 5) VEHÍCULOS
-    final idVeh1 = await db.insert('vehiculo', {
-      'cod_cliente': idCliente1,
-      'cod_marca_veh': idToyota,
-      'cod_modelo_veh': idHilux,
-      'kilometraje': 125000,
-      'placas': 'ABC-123',
-      'numero_serie': 'XYZ987654',
-      'color': 'GRIS'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 6) VEHÍCULOS (2–3 POR CLIENTE)
+    final vehIds = <int>[];
 
-    final idVeh2 = await db.insert('vehiculo', {
-      'cod_cliente': idCliente2,
-      'cod_marca_veh': idNissan,
-      'cod_modelo_veh': idSentra,
-      'kilometraje': 80000,
-      'placas': 'XYZ-987',
-      'numero_serie': 'AA112233',
-      'color': 'NEGRO'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // CLIENTE 1
+    final idVeh1 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente1,
+        'cod_marca_veh': idToyota,
+        'cod_modelo_veh': idHilux,
+        'kilometraje': 125000,
+        'placas': 'ABC-123',
+        'numero_serie': 'XYZ987654',
+        'color': 'GRIS',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh1);
 
-    final idVeh3 = await db.insert('vehiculo', {
-      'cod_cliente': idCliente3,
-      'cod_marca_veh': idHyundai,
-      'cod_modelo_veh': idTucson,
-      'kilometraje': 45000,
-      'placas': 'MNO-456',
-      'numero_serie': 'BB445566',
-      'color': 'AZUL'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final idVeh2 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente1,
+        'cod_marca_veh': idToyota,
+        'cod_modelo_veh': idCorolla,
+        'kilometraje': 90000,
+        'placas': 'ABC-456',
+        'numero_serie': 'XYZ111222',
+        'color': 'BLANCO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh2);
 
-    // 6) TIPOS DE TRABAJO
-    final idDiag         = await db.insert('tipo_trabajo', {'descripcion': 'DIAGNÓSTICO'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idMant         = await db.insert('tipo_trabajo', {'descripcion': 'MANTENIMIENTO'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idRep          = await db.insert('tipo_trabajo', {'descripcion': 'REPARACIÓN MECÁNICA'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idProg         = await db.insert('tipo_trabajo', {'descripcion': 'PROGRAMACIÓN ECU'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idCambioAceite = await db.insert('tipo_trabajo', {'descripcion': 'CAMBIO DE ACEITE'}, conflictAlgorithm: ConflictAlgorithm.ignore);
-    final idAlineacion   = await db.insert('tipo_trabajo', {'descripcion': 'ALINEACIÓN Y BALANCEO'}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final idVeh3 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente1,
+        'cod_marca_veh': idNissan,
+        'cod_modelo_veh': idSentra,
+        'kilometraje': 70000,
+        'placas': 'ABC-789',
+        'numero_serie': 'XYZ333444',
+        'color': 'NEGRO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh3);
 
-    // 7) INVENTARIO
-    final idAceite = await db.insert('inventario_vehiculo', {
-      'descripcion_inv': 'Lubricante 10W-40',
-      'descripcion': 'Aceite sintético de motor',
-      'foto_path': 'assets/img/aceite.png'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // CLIENTE 2
+    final idVeh4 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente2,
+        'cod_marca_veh': idNissan,
+        'cod_modelo_veh': idSentra,
+        'kilometraje': 80000,
+        'placas': 'XYZ-987',
+        'numero_serie': 'AA112233',
+        'color': 'NEGRO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh4);
 
-    final idFiltro = await db.insert('inventario_vehiculo', {
-      'descripcion_inv': 'Filtro de aire',
-      'descripcion': 'Filtro de aire de motor Toyota',
-      'foto_path': 'assets/img/filtro.png'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final idVeh5 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente2,
+        'cod_marca_veh': idHyundai,
+        'cod_modelo_veh': idElantra,
+        'kilometraje': 60000,
+        'placas': 'XYZ-654',
+        'numero_serie': 'AA445566',
+        'color': 'PLATEADO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh5);
 
-    final idBujia = await db.insert('inventario_vehiculo', {
-      'descripcion_inv': 'Bujías NGK',
-      'descripcion': 'Juego de bujías estándar',
-      'foto_path': 'assets/img/bujia.png'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // CLIENTE 3
+    final idVeh6 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente3,
+        'cod_marca_veh': idHyundai,
+        'cod_modelo_veh': idTucson,
+        'kilometraje': 45000,
+        'placas': 'MNO-456',
+        'numero_serie': 'BB445566',
+        'color': 'AZUL',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh6);
 
-    await db.insert('reg_inventario_vehiculo', {
-      'cod_inv_veh': idAceite,
-      'cod_vehiculo': idVeh1,
-      'cod_empleado': idEmpMec,
-      'cantidad': 2,
-      'estado': 'NUEVO',
-      'foto_path': 'assets/img/aceite.png'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final idVeh7 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente3,
+        'cod_marca_veh': idKia,
+        'cod_modelo_veh': idRio,
+        'kilometraje': 30000,
+        'placas': 'MNO-789',
+        'numero_serie': 'BB778899',
+        'color': 'ROJO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh7);
 
-    await db.insert('reg_inventario_vehiculo', {
-      'cod_inv_veh': idFiltro,
-      'cod_vehiculo': idVeh2,
-      'cod_empleado': idEmpTec,
-      'cantidad': 1,
-      'estado': 'USADO',
-      'foto_path': 'assets/img/filtro.png'
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // CLIENTE 4
+    final idVeh8 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente4,
+        'cod_marca_veh': idChevrolet,
+        'cod_modelo_veh': idOnix,
+        'kilometraje': 20000,
+        'placas': 'DEF-111',
+        'numero_serie': 'CC111222',
+        'color': 'BLANCO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh8);
 
-    // 8) SERVICIOS + RECIBOS
+    final idVeh9 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente4,
+        'cod_marca_veh': idToyota,
+        'cod_modelo_veh': idCorolla,
+        'kilometraje': 50000,
+        'placas': 'DEF-222',
+        'numero_serie': 'CC333444',
+        'color': 'GRIS',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh9);
+
+    // CLIENTE 5
+    final idVeh10 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente5,
+        'cod_marca_veh': idKia,
+        'cod_modelo_veh': idRio,
+        'kilometraje': 55000,
+        'placas': 'GHI-333',
+        'numero_serie': 'DD111222',
+        'color': 'NEGRO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh10);
+
+    final idVeh11 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente5,
+        'cod_marca_veh': idHyundai,
+        'cod_modelo_veh': idTucson,
+        'kilometraje': 40000,
+        'placas': 'GHI-444',
+        'numero_serie': 'DD333444',
+        'color': 'AZUL OSCURO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh11);
+
+    // CLIENTE 6
+    final idVeh12 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente6,
+        'cod_marca_veh': idChevrolet,
+        'cod_modelo_veh': idOnix,
+        'kilometraje': 15000,
+        'placas': 'JKL-555',
+        'numero_serie': 'EE111222',
+        'color': 'PLATEADO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh12);
+
+    final idVeh13 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente6,
+        'cod_marca_veh': idToyota,
+        'cod_modelo_veh': idHilux,
+        'kilometraje': 90000,
+        'placas': 'JKL-666',
+        'numero_serie': 'EE333444',
+        'color': 'BLANCO PERLA',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh13);
+
+    // CLIENTE 7
+    final idVeh14 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente7,
+        'cod_marca_veh': idNissan,
+        'cod_modelo_veh': idSentra,
+        'kilometraje': 65000,
+        'placas': 'PQR-777',
+        'numero_serie': 'FF111222',
+        'color': 'GRIS OSCURO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh14);
+
+    final idVeh15 = await db.insert(
+      'vehiculo',
+      {
+        'cod_cliente': idCliente7,
+        'cod_marca_veh': idHyundai,
+        'cod_modelo_veh': idElantra,
+        'kilometraje': 35000,
+        'placas': 'PQR-888',
+        'numero_serie': 'FF333444',
+        'color': 'ROJO VINO',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    vehIds.add(idVeh15);
+
+    // 7) TIPOS DE TRABAJO (SOLO 4 CATEGORÍAS)
+    final idDiag = await db.insert(
+      'tipo_trabajo',
+      {'descripcion': 'DIAGNÓSTICO'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idMant = await db.insert(
+      'tipo_trabajo',
+      {'descripcion': 'MANTENIMIENTO'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idRepGen = await db.insert(
+      'tipo_trabajo',
+      {'descripcion': 'REPARACIONES EN GENERAL'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    final idProgMod = await db.insert(
+      'tipo_trabajo',
+      {'descripcion': 'PROGRAMACIÓN DE MÓDULOS'},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    // 8) INVENTARIO (VARIOS OBJETOS)
+    final idAceite = await db.insert(
+      'inventario_vehiculo',
+      {
+        'descripcion_inv': 'Lubricante 10W-40',
+        'descripcion': 'Aceite sintético de motor',
+        'foto_path': 'assets/img/aceite.png',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final idFiltro = await db.insert(
+      'inventario_vehiculo',
+      {
+        'descripcion_inv': 'Filtro de aire',
+        'descripcion': 'Filtro de aire de motor Toyota',
+        'foto_path': 'assets/img/filtro.png',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final idBujia = await db.insert(
+      'inventario_vehiculo',
+      {
+        'descripcion_inv': 'Bujías NGK',
+        'descripcion': 'Juego de bujías estándar',
+        'foto_path': 'assets/img/bujia.png',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final idPastillas = await db.insert(
+      'inventario_vehiculo',
+      {
+        'descripcion_inv': 'Pastillas de freno',
+        'descripcion': 'Juego de pastillas delanteras',
+        'foto_path': 'assets/img/pastillas.png',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final idBateria = await db.insert(
+      'inventario_vehiculo',
+      {
+        'descripcion_inv': 'Batería 12V',
+        'descripcion': 'Batería de arranque 12V 70Ah',
+        'foto_path': 'assets/img/bateria.png',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final idLlanta = await db.insert(
+      'inventario_vehiculo',
+      {
+        'descripcion_inv': 'Llanta 16"',
+        'descripcion': 'Llanta radial 16 pulgadas',
+        'foto_path': 'assets/img/llanta.png',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final invItems = [idAceite, idFiltro, idBujia, idPastillas, idBateria, idLlanta];
+
+    // 👉 POR CADA VEHÍCULO, REGISTRAR AL MENOS 3 OBJETOS
+    for (final vId in vehIds) {
+      for (int i = 0; i < 3; i++) {
+        final invId = invItems[(i + vId) % invItems.length];
+        await db.insert(
+          'reg_inventario_vehiculo',
+          {
+            'cod_inv_veh': invId,
+            'cod_vehiculo': vId,
+            'cod_empleado': idEmpMec,
+            'cantidad': 1 + (i % 3),
+            'estado': i == 0 ? 'NUEVO' : 'USADO',
+            'foto_path': null,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    }
+
+    // 9) SERVICIOS + RECIBOS (USANDO LAS 4 CATEGORÍAS)
     Future<void> _crearServicio(
       int codCliente,
       int codVeh,
@@ -652,99 +1121,158 @@ class DatabaseHelper {
       List<Map<String, dynamic>> trabajos,
       double total,
     ) async {
-      final idRecibo = await db.insert('recibo_pago', {
-        'fecha': DateTime.now().toIso8601String(),
-        'total': total,
-        'a_cuenta': total * 0.5,
-        'saldo': total * 0.5,
-        'transferencia_pago': 'EFECTIVO',
-        'cod_cliente': codCliente,
-        'cod_empleado': codEmpleado,
-        'cod_est_rec': 1
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      final idRecibo = await db.insert(
+        'recibo_pago',
+        {
+          'fecha': DateTime.now().toIso8601String(),
+          'total': total,
+          'a_cuenta': total * 0.5,
+          'saldo': total * 0.5,
+          'transferencia_pago': 'EFECTIVO',
+          'cod_cliente': codCliente,
+          'cod_empleado': codEmpleado,
+          'cod_est_rec': 1,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
 
-      final idServ = await db.insert('registro_servicio_taller', {
-        'cod_recibo_pago': idRecibo,
-        'cod_vehiculo': codVeh,
-        'cod_empleado': codEmpleado,
-        'fecha_ingreso': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
-        'fecha_salida': DateTime.now().toIso8601String(),
-        'ingreso_en_grua': 0,
-        'observaciones': 'Servicio general con diagnóstico y mantenimiento preventivo.'
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      final idServ = await db.insert(
+        'registro_servicio_taller',
+        {
+          'cod_recibo_pago': idRecibo,
+          'cod_vehiculo': codVeh,
+          'cod_empleado': codEmpleado,
+          'fecha_ingreso':
+              DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+          'fecha_salida': DateTime.now().toIso8601String(),
+          'ingreso_en_grua': 0,
+          'observaciones':
+              'Servicio general con diagnóstico y mantenimiento preventivo.',
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
 
       for (var t in trabajos) {
-        await db.insert('reg_serv_taller_tipo_trabajo', {
-          'cod_ser_taller': idServ,
-          'cod_tipo_trabajo': t['id'],
-          'costo': t['costo'],
-          'detalles': t['detalle']
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        await db.insert(
+          'reg_serv_taller_tipo_trabajo',
+          {
+            'cod_ser_taller': idServ,
+            'cod_tipo_trabajo': t['id'],
+            'costo': t['costo'],
+            'detalles': t['detalle'],
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
       }
     }
 
     await _crearServicio(idCliente1, idVeh1, idEmpMec, [
-      {'id': idDiag, 'costo': 80.0, 'detalle': 'Escaneo completo del sistema ECU'},
-      {'id': idCambioAceite, 'costo': 50.0, 'detalle': 'Cambio de aceite sintético 10W-40'},
+      {
+        'id': idDiag,
+        'costo': 80.0,
+        'detalle': 'DIAGNÓSTICO COMPLETO DEL SISTEMA ELÉCTRICO',
+      },
+      {
+        'id': idMant,
+        'costo': 50.0,
+        'detalle': 'MANTENIMIENTO PREVENTIVO (CAMBIO ACEITE, FILTROS)',
+      },
     ], 130.0);
 
-    await _crearServicio(idCliente2, idVeh2, idEmpTec, [
-      {'id': idRep, 'costo': 250.0, 'detalle': 'Cambio de bomba de combustible'},
-      {'id': idAlineacion, 'costo': 80.0, 'detalle': 'Alineación y balanceo de ruedas'},
+    await _crearServicio(idCliente2, idVeh4, idEmpTec, [
+      {
+        'id': idRepGen,
+        'costo': 250.0,
+        'detalle': 'REPARACIONES EN GENERAL DEL SISTEMA DE COMBUSTIBLE',
+      },
+      {
+        'id': idMant,
+        'costo': 80.0,
+        'detalle': 'MANTENIMIENTO BÁSICO POST-REPARACIÓN',
+      },
     ], 330.0);
 
-    await _crearServicio(idCliente3, idVeh3, idEmpMec, [
-      {'id': idProg, 'costo': 200.0, 'detalle': 'Reprogramación de ECU y actualización de firmware'},
-      {'id': idMant, 'costo': 150.0, 'detalle': 'Revisión de frenos y líquido refrigerante'},
+    await _crearServicio(idCliente3, idVeh6, idEmpMec, [
+      {
+        'id': idProgMod,
+        'costo': 200.0,
+        'detalle': 'PROGRAMACIÓN DE MÓDULOS Y REPROGRAMACIÓN DE ECU',
+      },
+      {
+        'id': idMant,
+        'costo': 150.0,
+        'detalle': 'MANTENIMIENTO DE FRENOS Y SISTEMA DE REFRIGERACIÓN',
+      },
     ], 350.0);
 
-    // 9) AUXILIOS MECÁNICOS
-    await db.insert('registro_auxilio_mecanico', {
-      'fecha': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
-      'ubicacion_cliente': 'Av. 6 de Marzo, El Alto',
-      'cod_cliente': idCliente1
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 10) AUXILIOS MECÁNICOS
+    await db.insert(
+      'registro_auxilio_mecanico',
+      {
+        'fecha': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+        'ubicacion_cliente': 'Av. 6 de Marzo, El Alto',
+        'cod_cliente': idCliente1,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    await db.insert('registro_auxilio_mecanico', {
-      'fecha': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
-      'ubicacion_cliente': 'Plaza del Estudiante, La Paz',
-      'cod_cliente': idCliente2
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert(
+      'registro_auxilio_mecanico',
+      {
+        'fecha': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+        'ubicacion_cliente': 'Plaza del Estudiante, La Paz',
+        'cod_cliente': idCliente2,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    // 10) USUARIOS
-    await db.insert('usuario', {
-      'nombre_usu': 'admin',
-      'contrasena_usu': '12345',
-      'correo': 'admin@electronica.com',
-      'nivel_acceso': 'ADMIN',
-      'estado': 'ACTIVO',
-      'cod_persona': idPers3,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    // 11) USUARIOS
+    await db.insert(
+      'usuario',
+      {
+        'nombre_usu': 'admin',
+        'contrasena_usu': '12345',
+        'correo': 'admin@electronica.com',
+        'nivel_acceso': 'ADMIN',
+        'estado': 'ACTIVO',
+        'cod_persona': idPers3,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    await db.insert('usuario', {
-      'nombre_usu': 'mecanico',
-      'contrasena_usu': '12345',
-      'correo': 'mecanico@electronica.com',
-      'nivel_acceso': 'MECANICO',
-      'estado': 'ACTIVO',
-      'cod_persona': idPers2,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert(
+      'usuario',
+      {
+        'nombre_usu': 'mecanico',
+        'contrasena_usu': '12345',
+        'correo': 'mecanico@electronica.com',
+        'nivel_acceso': 'MECANICO',
+        'estado': 'ACTIVO',
+        'cod_persona': idPers2,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
-    await db.insert('usuario', {
-      'nombre_usu': 'cliente',
-      'contrasena_usu': '12345',
-      'correo': 'cliente@electronica.com',
-      'nivel_acceso': 'CLIENTE',
-      'estado': 'ACTIVO',
-      'cod_persona': idPers1,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert(
+      'usuario',
+      {
+        'nombre_usu': 'cliente',
+        'contrasena_usu': '12345',
+        'correo': 'cliente@electronica.com',
+        'nivel_acceso': 'CLIENTE',
+        'estado': 'ACTIVO',
+        'cod_persona': idPers1,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
 
     // ignore: avoid_print
     print('✅ SEED DEMO COMPLETO CREADO CON ÉXITO.');
   }
 
   // CRUD DE BAJO NIVEL
-  Future<List<Map<String, Object?>>> rawQuery(String sql, [List<Object?>? args]) async {
+  Future<List<Map<String, Object?>>> rawQuery(String sql,
+      [List<Object?>? args]) async {
     final db = await database;
     return db.rawQuery(sql, args);
   }

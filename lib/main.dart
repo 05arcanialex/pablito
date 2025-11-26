@@ -7,6 +7,7 @@ import 'viewmodels/dashboard_viewmodel.dart';
 import 'viewmodels/clientes_viewmodel.dart';
 import 'viewmodels/pagos_viewmodel.dart';
 import 'viewmodels/ubicaciones_viewmodel.dart'; // ⬅️ NUEVO
+import 'viewmodels/login_viewmodel.dart';      // ⬅️ PARA USAR demoEmail
 
 // 🎨 CONSTANTES
 import 'utils/constants.dart';
@@ -48,9 +49,10 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => DashboardViewModel()),
-        ChangeNotifierProvider(create: (_) => ClientesViewModel()..loadClientes()),
+        ChangeNotifierProvider(
+            create: (_) => ClientesViewModel()..loadClientes()),
         ChangeNotifierProvider(create: (_) => PagosViewModel()..init()),
-        ChangeNotifierProvider(create: (_) => UbicacionesViewModel()), // ⬅️ CLAVE
+        ChangeNotifierProvider(create: (_) => UbicacionesViewModel()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -79,7 +81,9 @@ class Root extends StatefulWidget {
 class _RootState extends State<Root> {
   bool _loggedIn = false;
 
-  void _handleLoggedIn() => setState(() => _loggedIn = true);
+  void _handleLoggedIn() {
+    setState(() => _loggedIn = true);
+  }
 
   void _handleSOS() {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -90,7 +94,19 @@ class _RootState extends State<Root> {
   @override
   Widget build(BuildContext context) {
     return _loggedIn
-        ? const DashboardScreen()
-        : LoginScreen(onLoggedIn: _handleLoggedIn, onPressSOS: _handleSOS);
+        ? DashboardScreen(
+            // 👤 POR AHORA DATOS DEMO (PUEDES CAMBIARLOS LUEGO POR LOS REALES DEL LOGIN)
+            userName: 'ADMIN DEMO',
+            userEmail: LoginViewModel.demoEmail,
+            onLogout: () {
+              setState(() {
+                _loggedIn = false; // 🔚 VUELVE AL LOGIN
+              });
+            },
+          )
+        : LoginScreen(
+            onLoggedIn: _handleLoggedIn,
+            onPressSOS: _handleSOS,
+          );
   }
 }
