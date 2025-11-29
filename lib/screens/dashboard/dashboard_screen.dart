@@ -7,7 +7,7 @@ import '../../utils/constants.dart';
 
 import '../servicios/servicios_screen.dart';
 import '../clientes/clientes_screen.dart';
-import '../ubicaciones/ubicaciones_screen.dart';
+import '../auxilio/mecanico_auxilios_screen.dart'; // Reemplazamos ubicaciones
 import '../inicio/inicio_screen.dart';
 import '../objetos/objetos_screen.dart';
 import '../pagos/pagos_screen.dart';
@@ -15,7 +15,7 @@ import '../historial/historial_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   // 👤 DATOS DEL USUARIO ACTUAL
-  final String userName;
+  final String userName;  
   final String userEmail;
 
   // 🔚 CALLBACK PARA CERRAR SESIÓN
@@ -35,7 +35,7 @@ class DashboardScreen extends StatelessWidget {
     final pages = <Widget>[
       const ServiciosScreen(),       // 0
       const ClientesScreen(),        // 1
-      const UbicacionesScreen(),     // 2
+      const MecanicoAuxiliosScreen(), // 2 - AHORA ES AUXILIO MECÁNICO
       InicioScreen(                  // 3
         onQuickAccess: (i) => context.read<DashboardViewModel>().changeIndex(i),
       ),
@@ -91,7 +91,7 @@ class DashboardScreen extends StatelessWidget {
       case 1:
         return "CLIENTES";
       case 2:
-        return "UBICACIONES";
+        return "AUXILIO MECÁNICO"; // CAMBIADO
       case 3:
         return AppStrings.dashboard;
       case 4:
@@ -107,10 +107,10 @@ class DashboardScreen extends StatelessWidget {
 
   Drawer _buildDrawer(BuildContext context, DashboardViewModel dashboardVM) {
     final displayName =
-        userName.isEmpty ? "USUARIO" : userName; // fallback si viene vacío
+        userName.isEmpty ? "USUARIO" : userName;
     final displayEmail = userEmail.isEmpty
         ? "usuario@correo.com"
-        : userEmail; // fallback si viene vacío
+        : userEmail;
 
     return Drawer(
       child: Column(
@@ -141,7 +141,7 @@ class DashboardScreen extends StatelessWidget {
           _buildDrawerItem(context, Icons.build, "SERVICIOS", 0, dashboardVM),
           _buildDrawerItem(context, Icons.people, "CLIENTES", 1, dashboardVM),
           _buildDrawerItem(
-              context, Icons.location_on, "UBICACIONES", 2, dashboardVM),
+              context, Icons.build_circle, "AUXILIO MECÁNICO", 2, dashboardVM), // CAMBIADO
           _buildDrawerItem(
               context, Icons.inventory_2, "OBJETOS", 4, dashboardVM),
           _buildDrawerItem(context, Icons.payments, "PAGOS", 5, dashboardVM),
@@ -156,8 +156,8 @@ class DashboardScreen extends StatelessWidget {
               style: AppTextStyles.body.copyWith(color: AppColors.error),
             ),
             onTap: () {
-              Navigator.pop(context); // cierra el drawer
-              onLogout();            // 🔚 AVISA AL ROOT QUE CIERRE SESIÓN
+              Navigator.pop(context);
+              onLogout();
             },
           ),
         ],
@@ -195,7 +195,7 @@ class DashboardScreen extends StatelessWidget {
   }
 
   // ───────────────────────────────────────────────────
-  // NAV BOTTOM RESPONSIVO (IGUAL QUE TENÍAS)
+  // NAV BOTTOM RESPONSIVO
   // ───────────────────────────────────────────────────
   Widget _buildResponsiveBottomNavigationBar(
     DashboardViewModel dashboardVM,
@@ -232,7 +232,7 @@ class DashboardScreen extends StatelessWidget {
                   isMobile: true),
               _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM,
                   isMobile: true),
-              _buildNavItem(Icons.location_on, "UBICACIONES", 2, dashboardVM,
+              _buildNavItem(Icons.build_circle, "AUXILIO", 2, dashboardVM, // CAMBIADO
                   isMobile: true),
               _buildNavItemInicio(dashboardVM, isMobile: true),
               _buildNavItem(Icons.inventory_2, "OBJETOS", 4, dashboardVM,
@@ -274,7 +274,7 @@ class DashboardScreen extends StatelessWidget {
                         isTablet: true),
                     _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM,
                         isTablet: true),
-                    _buildNavItem(Icons.location_on, "UBICACIONES", 2,
+                    _buildNavItem(Icons.build_circle, "AUXILIO", 2, // CAMBIADO
                         dashboardVM,
                         isTablet: true),
                   ],
@@ -327,7 +327,7 @@ class DashboardScreen extends StatelessWidget {
                         isDesktop: true),
                     _buildNavItem(Icons.people, "CLIENTES", 1, dashboardVM,
                         isDesktop: true),
-                    _buildNavItem(Icons.location_on, "UBICACIONES", 2,
+                    _buildNavItem(Icons.build_circle, "AUXILIO", 2, // CAMBIADO
                         dashboardVM,
                         isDesktop: true),
                   ],

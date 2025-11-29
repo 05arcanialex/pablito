@@ -24,7 +24,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 5, // ⬅️ V5 CON TODOS LOS CAMBIOS
+      version: 8, // ⬅️ V8 CON COLUMNAS FALTANTES
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -66,6 +66,61 @@ class DatabaseHelper {
             ''');
           } catch (_) {}
         }
+        // V5 -> V6: agregar tabla seguimiento_servicio
+        if (oldV < 6) {
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS seguimiento_servicio(
+                cod_seguimiento INTEGER PRIMARY KEY AUTOINCREMENT,
+                cod_ser_taller INTEGER NOT NULL,
+                paso_actual INTEGER NOT NULL DEFAULT 1,
+                diagnostico TEXT,
+                foto_diagnostico TEXT,
+                fallas_identificadas TEXT,
+                foto_fallas TEXT,
+                observaciones_fallas TEXT,
+                foto_observaciones TEXT,
+                solucion_aplicada TEXT,
+                foto_reparacion TEXT,
+                resultado_pruebas TEXT,
+                foto_pruebas TEXT,
+                fecha_ultima_actualizacion TEXT,
+                estado TEXT DEFAULT 'EN_PROCESO',
+                FOREIGN KEY(cod_ser_taller) REFERENCES registro_servicio_taller(cod_ser_taller)
+                  ON UPDATE CASCADE ON DELETE CASCADE
+              );
+            ''');
+          } catch (_) {}
+        }
+        // ✅ V6 -> V7: AGREGAR COLUMNA firebase_rescue_id A registro_auxilio_mecanico
+        if (oldV < 7) {
+          try {
+            await db.execute(
+              'ALTER TABLE registro_auxilio_mecanico ADD COLUMN firebase_rescue_id TEXT'
+            );
+            print('✅ Columna firebase_rescue_id agregada a registro_auxilio_mecanico');
+          } catch (e) {
+            print('⚠️ Error agregando firebase_rescue_id: $e');
+            // Si falla, recrear la tabla completa
+            await _recreateRegistroAuxilioMecanicoV7(db);
+          }
+        }
+        // ✅ V7 -> V8: AGREGAR COLUMNAS cod_empleado Y estado_auxilio
+        if (oldV < 8) {
+          try {
+            await db.execute(
+              'ALTER TABLE registro_auxilio_mecanico ADD COLUMN cod_empleado INTEGER'
+            );
+            await db.execute(
+              'ALTER TABLE registro_auxilio_mecanico ADD COLUMN estado_auxilio TEXT DEFAULT "PENDIENTE"'
+            );
+            print('✅ Columnas cod_empleado y estado_auxilio agregadas a registro_auxilio_mecanico');
+          } catch (e) {
+            print('⚠️ Error agregando columnas faltantes: $e');
+            // Si falla, recrear la tabla completa con todas las columnas
+            await _recreateRegistroAuxilioMecanicoV8(db);
+          }
+        }
       },
       onOpen: (db) async {
         await _ensureTables(db); // BLINDA TABLAS
@@ -87,6 +142,94 @@ class DatabaseHelper {
     }
 
     return db;
+  }
+
+  // ✅ MÉTODO PARA RECREAR TABLA EN V7
+  Future<void> _recreateRegistroAuxilioMecanicoV7(Database db) async {
+    print('🔄 Recreando tabla registro_auxilio_mecanico V7...');
+    
+    // 1. Crear tabla temporal con la nueva estructura
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS registro_auxilio_mecanico_temp(
+        cod_reg_auxilio   INTEGER PRIMARY KEY AUTOINCREMENT,
+        firebase_rescue_id TEXT,
+        fecha             TEXT NOT NULL,
+        ubicacion_cliente TEXT,
+        cod_cliente       INTEGER NOT NULL,
+        FOREIGN KEY(cod_cliente) REFERENCES cliente(cod_cliente)
+          ON UPDATE CASCADE ON DELETE CASCADE
+      );
+    ''');
+
+    // 2. Copiar datos existentes si los hay
+    try {
+      await db.execute('''
+        INSERT INTO registro_auxilio_mecanico_temp 
+        (cod_reg_auxilio, fecha, ubicacion_cliente, cod_cliente, firebase_rescue_id)
+        SELECT cod_reg_auxilio, fecha, ubicacion_cliente, cod_cliente, NULL
+        FROM registro_auxilio_mecanico
+      ''');
+    } catch (e) {
+      print('ℹ️ No hay datos existentes para migrar: $e');
+    }
+
+    // 3. Eliminar tabla vieja
+    await db.execute('DROP TABLE IF EXISTS registro_auxilio_mecanico');
+
+    // 4. Renombrar tabla temporal
+    await db.execute('ALTER TABLE registro_auxilio_mecanico_temp RENAME TO registro_auxilio_mecanico');
+    
+    print('✅ Tabla registro_auxilio_mecanico recreada con firebase_rescue_id');
+  }
+
+  // ✅ MÉTODO PARA RECREAR TABLA EN V8 CON TODAS LAS COLUMNAS
+  Future<void> _recreateRegistroAuxilioMecanicoV8(Database db) async {
+    print('🔄 Recreando tabla registro_auxilio_mecanico V8 con todas las columnas...');
+    
+    // 1. Crear tabla temporal con la estructura completa
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS registro_auxilio_mecanico_temp(
+        cod_reg_auxilio   INTEGER PRIMARY KEY AUTOINCREMENT,
+        firebase_rescue_id TEXT,
+        fecha             TEXT NOT NULL,
+        ubicacion_cliente TEXT,
+        cod_cliente       INTEGER NOT NULL,
+        cod_empleado      INTEGER,
+        estado_auxilio    TEXT DEFAULT 'PENDIENTE',
+        fecha_actualizacion TEXT,
+        FOREIGN KEY(cod_cliente) REFERENCES cliente(cod_cliente)
+          ON UPDATE CASCADE ON DELETE CASCADE,
+        FOREIGN KEY(cod_empleado) REFERENCES empleado(cod_empleado)
+          ON UPDATE CASCADE ON DELETE SET NULL
+      );
+    ''');
+
+    // 2. Copiar datos existentes si los hay
+    try {
+      await db.execute('''
+        INSERT INTO registro_auxilio_mecanico_temp 
+        (cod_reg_auxilio, firebase_rescue_id, fecha, ubicacion_cliente, cod_cliente, cod_empleado, estado_auxilio)
+        SELECT 
+          cod_reg_auxilio, 
+          firebase_rescue_id, 
+          fecha, 
+          ubicacion_cliente, 
+          cod_cliente,
+          NULL as cod_empleado,
+          'PENDIENTE' as estado_auxilio
+        FROM registro_auxilio_mecanico
+      ''');
+    } catch (e) {
+      print('ℹ️ No hay datos existentes para migrar: $e');
+    }
+
+    // 3. Eliminar tabla vieja
+    await db.execute('DROP TABLE IF EXISTS registro_auxilio_mecanico');
+
+    // 4. Renombrar tabla temporal
+    await db.execute('ALTER TABLE registro_auxilio_mecanico_temp RENAME TO registro_auxilio_mecanico');
+    
+    print('✅ Tabla registro_auxilio_mecanico recreada con todas las columnas (V8)');
   }
 
   // CREACIÓN INICIAL
@@ -160,20 +303,30 @@ class DatabaseHelper {
       JOIN estado_recibo er ON er.cod_est_rec = rp.cod_est_rec;
     ''');
 
-    // ---------- AUXILIO MECÁNICO ----------
+    // ---------- AUXILIO MECÁNICO (ACTUALIZADA CON NUEVAS COLUMNAS) ----------
     await db.execute('''
       CREATE VIEW IF NOT EXISTS vw_historial_auxilio AS
       SELECT
         'AUXILIO'                                   AS modulo,
         'SOLICITUD'                                 AS tipo,
-        ('Auxilio #' || ram.cod_reg_auxilio)        AS titulo,
+        ('Auxilio #' || ram.cod_reg_auxilio || 
+         COALESCE(' (' || ram.firebase_rescue_id || ')', '')) AS titulo,
         ('Cliente: ' || (p.nombre || ' ' || p.apellidos) ||
-         COALESCE(' • Ubicación: ' || ram.ubicacion_cliente, '')) AS subtitulo,
+         COALESCE(' • Ubicación: ' || ram.ubicacion_cliente, '') ||
+         COALESCE(' • Estado: ' || ram.estado_auxilio, '') ||
+         COALESCE(' • Mecánico: ' || (SELECT (pe.nombre || ' ' || pe.apellidos) 
+                                     FROM empleado e 
+                                     JOIN persona pe ON pe.cod_persona = e.cod_persona 
+                                     WHERE e.cod_empleado = ram.cod_empleado), '')
+        ) AS subtitulo,
         NULL                                        AS monto,
         ram.fecha                                   AS fecha_iso,
         ram.cod_cliente                             AS cod_cliente,
         'registro_auxilio_mecanico'                 AS ref_table,
-        ram.cod_reg_auxilio                         AS ref_id
+        ram.cod_reg_auxilio                         AS ref_id,
+        ram.firebase_rescue_id                      AS firebase_id,
+        ram.estado_auxilio                          AS estado_auxilio,
+        ram.cod_empleado                            AS cod_empleado
       FROM registro_auxilio_mecanico ram
       JOIN cliente c ON c.cod_cliente = ram.cod_cliente
       JOIN persona p ON p.cod_persona = c.cod_persona;
@@ -217,18 +370,23 @@ class DatabaseHelper {
       JOIN persona p ON p.cod_persona = c.cod_persona;
     ''');
 
-    // ---------- VISTA UNIFICADA ----------
+    // ---------- VISTA UNIFICADA (ACTUALIZADA) ----------
     await db.execute('''
       CREATE VIEW IF NOT EXISTS vw_historial_all AS
-      SELECT * FROM vw_historial_pagos
+      SELECT modulo, tipo, titulo, subtitulo, monto, fecha_iso, cod_cliente, ref_table, ref_id, NULL as firebase_id, NULL as estado_auxilio, NULL as cod_empleado
+      FROM vw_historial_pagos
       UNION ALL
-      SELECT * FROM vw_historial_auxilio
+      SELECT modulo, tipo, titulo, subtitulo, monto, fecha_iso, cod_cliente, ref_table, ref_id, firebase_id, estado_auxilio, cod_empleado
+      FROM vw_historial_auxilio
       UNION ALL
-      SELECT * FROM vw_historial_servicios
+      SELECT modulo, tipo, titulo, subtitulo, monto, fecha_iso, cod_cliente, ref_table, ref_id, NULL as firebase_id, NULL as estado_auxilio, NULL as cod_empleado
+      FROM vw_historial_servicios
       UNION ALL
-      SELECT * FROM vw_historial_objetos
+      SELECT modulo, tipo, titulo, subtitulo, monto, fecha_iso, cod_cliente, ref_table, ref_id, NULL as firebase_id, NULL as estado_auxilio, NULL as cod_empleado
+      FROM vw_historial_objetos
       UNION ALL
-      SELECT * FROM vw_historial_clientes;
+      SELECT modulo, tipo, titulo, subtitulo, monto, fecha_iso, cod_cliente, ref_table, ref_id, NULL as firebase_id, NULL as estado_auxilio, NULL as cod_empleado
+      FROM vw_historial_clientes;
     ''');
 
     // Vista vw_servicios clásica
@@ -372,14 +530,21 @@ class DatabaseHelper {
       );
     ''');
 
+    // ✅ TABLA ACTUALIZADA CON TODAS LAS COLUMNAS NECESARIAS
     await db.execute('''
       CREATE TABLE IF NOT EXISTS registro_auxilio_mecanico(
         cod_reg_auxilio   INTEGER PRIMARY KEY AUTOINCREMENT,
+        firebase_rescue_id TEXT,
         fecha             TEXT NOT NULL,
         ubicacion_cliente TEXT,
         cod_cliente       INTEGER NOT NULL,
+        cod_empleado      INTEGER,
+        estado_auxilio    TEXT DEFAULT 'PENDIENTE',
+        fecha_actualizacion TEXT,
         FOREIGN KEY(cod_cliente) REFERENCES cliente(cod_cliente)
-          ON UPDATE CASCADE ON DELETE CASCADE
+          ON UPDATE CASCADE ON DELETE CASCADE,
+        FOREIGN KEY(cod_empleado) REFERENCES empleado(cod_empleado)
+          ON UPDATE CASCADE ON DELETE SET NULL
       );
     ''');
 
@@ -469,6 +634,29 @@ class DatabaseHelper {
           ON UPDATE CASCADE ON DELETE CASCADE
       );
     ''');
+
+    // ⬇️ TABLA SEGUIMIENTO SERVICIO (NUEVA)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seguimiento_servicio(
+        cod_seguimiento INTEGER PRIMARY KEY AUTOINCREMENT,
+        cod_ser_taller INTEGER NOT NULL,
+        paso_actual INTEGER NOT NULL DEFAULT 1,
+        diagnostico TEXT,
+        foto_diagnostico TEXT,
+        fallas_identificadas TEXT,
+        foto_fallas TEXT,
+        observaciones_fallas TEXT,
+        foto_observaciones TEXT,
+        solucion_aplicada TEXT,
+        foto_reparacion TEXT,
+        resultado_pruebas TEXT,
+        foto_pruebas TEXT,
+        fecha_ultima_actualizacion TEXT,
+        estado TEXT DEFAULT 'EN_PROCESO',
+        FOREIGN KEY(cod_ser_taller) REFERENCES registro_servicio_taller(cod_ser_taller)
+          ON UPDATE CASCADE ON DELETE CASCADE
+      );
+    ''');
   }
 
   // =============== MIGRACIÓN V4: usuario -> cod_persona ===============
@@ -533,7 +721,7 @@ class DatabaseHelper {
     }
   }
 
-  // 🔹 SEED DEMO COMPLETO (USA cod_persona EN USUARIO)
+  // 🔹 SEED DEMO COMPLETO (ACTUALIZADO CON NUEVAS COLUMNAS)
   Future<void> seedDemo() async {
     final db = await database;
     // ignore: avoid_print
@@ -1031,90 +1219,8 @@ class DatabaseHelper {
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
 
-    // 8) INVENTARIO (VARIOS OBJETOS)
-    final idAceite = await db.insert(
-      'inventario_vehiculo',
-      {
-        'descripcion_inv': 'Lubricante 10W-40',
-        'descripcion': 'Aceite sintético de motor',
-        'foto_path': 'assets/img/aceite.png',
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
-    final idFiltro = await db.insert(
-      'inventario_vehiculo',
-      {
-        'descripcion_inv': 'Filtro de aire',
-        'descripcion': 'Filtro de aire de motor Toyota',
-        'foto_path': 'assets/img/filtro.png',
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
-    final idBujia = await db.insert(
-      'inventario_vehiculo',
-      {
-        'descripcion_inv': 'Bujías NGK',
-        'descripcion': 'Juego de bujías estándar',
-        'foto_path': 'assets/img/bujia.png',
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
-    final idPastillas = await db.insert(
-      'inventario_vehiculo',
-      {
-        'descripcion_inv': 'Pastillas de freno',
-        'descripcion': 'Juego de pastillas delanteras',
-        'foto_path': 'assets/img/pastillas.png',
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
-    final idBateria = await db.insert(
-      'inventario_vehiculo',
-      {
-        'descripcion_inv': 'Batería 12V',
-        'descripcion': 'Batería de arranque 12V 70Ah',
-        'foto_path': 'assets/img/bateria.png',
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
-    final idLlanta = await db.insert(
-      'inventario_vehiculo',
-      {
-        'descripcion_inv': 'Llanta 16"',
-        'descripcion': 'Llanta radial 16 pulgadas',
-        'foto_path': 'assets/img/llanta.png',
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
-    final invItems = [idAceite, idFiltro, idBujia, idPastillas, idBateria, idLlanta];
-
-    // 👉 POR CADA VEHÍCULO, REGISTRAR AL MENOS 3 OBJETOS
-    for (final vId in vehIds) {
-      for (int i = 0; i < 3; i++) {
-        final invId = invItems[(i + vId) % invItems.length];
-        await db.insert(
-          'reg_inventario_vehiculo',
-          {
-            'cod_inv_veh': invId,
-            'cod_vehiculo': vId,
-            'cod_empleado': idEmpMec,
-            'cantidad': 1 + (i % 3),
-            'estado': i == 0 ? 'NUEVO' : 'USADO',
-            'foto_path': null,
-          },
-          conflictAlgorithm: ConflictAlgorithm.ignore,
-        );
-      }
-    }
-
-    // 9) SERVICIOS + RECIBOS (USANDO LAS 4 CATEGORÍAS)
-    Future<void> _crearServicio(
+    // 8) SERVICIOS + RECIBOS (USANDO LAS 4 CATEGORÍAS)
+    Future<void> crearServicio(
       int codCliente,
       int codVeh,
       int codEmpleado,
@@ -1164,9 +1270,25 @@ class DatabaseHelper {
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
       }
+
+      // 👉 CREAR SEGUIMIENTO DEMO PARA EL PRIMER SERVICIO
+      if (idServ == 1) {
+        await db.insert(
+          'seguimiento_servicio',
+          {
+            'cod_ser_taller': idServ,
+            'paso_actual': 3,
+            'diagnostico': 'Diagnóstico demo: Sistema eléctrico con fallas en alternador y batería',
+            'fallas_identificadas': 'Alternador no carga correctamente, batería descargada',
+            'observaciones_fallas': 'El alternador presenta desgaste en escobillas, la batería tiene 3 años de uso',
+            'fecha_ultima_actualizacion': DateTime.now().toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
     }
 
-    await _crearServicio(idCliente1, idVeh1, idEmpMec, [
+    await crearServicio(idCliente1, idVeh1, idEmpMec, [
       {
         'id': idDiag,
         'costo': 80.0,
@@ -1179,7 +1301,7 @@ class DatabaseHelper {
       },
     ], 130.0);
 
-    await _crearServicio(idCliente2, idVeh4, idEmpTec, [
+    await crearServicio(idCliente2, idVeh4, idEmpTec, [
       {
         'id': idRepGen,
         'costo': 250.0,
@@ -1192,7 +1314,7 @@ class DatabaseHelper {
       },
     ], 330.0);
 
-    await _crearServicio(idCliente3, idVeh6, idEmpMec, [
+    await crearServicio(idCliente3, idVeh6, idEmpMec, [
       {
         'id': idProgMod,
         'costo': 200.0,
@@ -1205,13 +1327,17 @@ class DatabaseHelper {
       },
     ], 350.0);
 
-    // 10) AUXILIOS MECÁNICOS
+    // 9) AUXILIOS MECÁNICOS (ACTUALIZADOS CON TODAS LAS COLUMNAS)
     await db.insert(
       'registro_auxilio_mecanico',
       {
+        'firebase_rescue_id': 'demo_rescue_001',
         'fecha': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
         'ubicacion_cliente': 'Av. 6 de Marzo, El Alto',
         'cod_cliente': idCliente1,
+        'cod_empleado': idEmpMec, // ✅ NUEVA COLUMNA
+        'estado_auxilio': 'ACEPTADO', // ✅ NUEVA COLUMNA
+        'fecha_actualizacion': DateTime.now().toIso8601String(),
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
@@ -1219,14 +1345,18 @@ class DatabaseHelper {
     await db.insert(
       'registro_auxilio_mecanico',
       {
+        'firebase_rescue_id': 'demo_rescue_002',
         'fecha': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
         'ubicacion_cliente': 'Plaza del Estudiante, La Paz',
         'cod_cliente': idCliente2,
+        'cod_empleado': idEmpTec, // ✅ NUEVA COLUMNA
+        'estado_auxilio': 'EN_CAMINO', // ✅ NUEVA COLUMNA
+        'fecha_actualizacion': DateTime.now().toIso8601String(),
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
 
-    // 11) USUARIOS
+    // 10) USUARIOS
     await db.insert(
       'usuario',
       {

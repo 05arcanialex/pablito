@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../utils/constants.dart';
 import '../../viewmodels/login_viewmodel.dart';
+import '../../screens/ubicaciones/ubicaciones_screen.dart'; // ← Importar la pantalla de ubicaciones
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoggedIn;
@@ -33,7 +34,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Inyectamos el ViewModel localmente
     return ChangeNotifierProvider(
       create: (_) => LoginViewModel(),
       child: Consumer<LoginViewModel>(
@@ -168,7 +168,6 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (ok) {
-      // ✅ Sin AuthState: dejamos que Root cambie de pantalla con onLoggedIn()
       widget.onLoggedIn();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -184,6 +183,12 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('SOS enviado')),
     );
-    widget.onPressSOS();
+    
+    // Navegar directamente a UbicacionesScreen
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => UbicacionesScreen(),
+      ),
+    );
   }
 }

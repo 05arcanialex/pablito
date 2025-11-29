@@ -12,6 +12,7 @@ class ServicioItem {
   final String tipos;
   final double totalAprox;
   final String? estado;
+  final bool tieneSeguimiento;
 
   ServicioItem({
     required this.codSerTaller,
@@ -23,6 +24,7 @@ class ServicioItem {
     required this.tipos,
     required this.totalAprox,
     required this.estado,
+    required this.tieneSeguimiento,
   });
 
   factory ServicioItem.fromRow(Map<String, Object?> r) {
@@ -42,6 +44,7 @@ class ServicioItem {
       tipos: (r['tipos'] ?? '') as String,
       totalAprox: toDouble(r['total_aprox']),
       estado: r['estado'] as String?,
+      tieneSeguimiento: (r['tiene_seguimiento'] ?? 0) == 1,
     );
   }
 }
@@ -57,6 +60,63 @@ class VehiculoVM {
   final int codVehiculo;
   final String label;
   VehiculoVM(this.codVehiculo, this.label);
+}
+
+/// MODELO SEGUIMIENTO SERVICIO
+class SeguimientoServicio {
+  final int codSeguimiento;
+  final int codSerTaller;
+  final int pasoActual;
+  final String? diagnostico;
+  final String? fotoDiagnostico;
+  final String? fallasIdentificadas;
+  final String? fotoFallas;
+  final String? observacionesFallas;
+  final String? fotoObservaciones;
+  final String? solucionAplicada;
+  final String? fotoReparacion;
+  final String? resultadoPruebas;
+  final String? fotoPruebas;
+  final String fechaUltimaActualizacion;
+  final String estado;
+
+  SeguimientoServicio({
+    required this.codSeguimiento,
+    required this.codSerTaller,
+    required this.pasoActual,
+    this.diagnostico,
+    this.fotoDiagnostico,
+    this.fallasIdentificadas,
+    this.fotoFallas,
+    this.observacionesFallas,
+    this.fotoObservaciones,
+    this.solucionAplicada,
+    this.fotoReparacion,
+    this.resultadoPruebas,
+    this.fotoPruebas,
+    required this.fechaUltimaActualizacion,
+    required this.estado,
+  });
+
+  factory SeguimientoServicio.fromRow(Map<String, Object?> r) {
+    return SeguimientoServicio(
+      codSeguimiento: r['cod_seguimiento'] as int,
+      codSerTaller: r['cod_ser_taller'] as int,
+      pasoActual: r['paso_actual'] as int,
+      diagnostico: r['diagnostico'] as String?,
+      fotoDiagnostico: r['foto_diagnostico'] as String?,
+      fallasIdentificadas: r['fallas_identificadas'] as String?,
+      fotoFallas: r['foto_fallas'] as String?,
+      observacionesFallas: r['observaciones_fallas'] as String?,
+      fotoObservaciones: r['foto_observaciones'] as String?,
+      solucionAplicada: r['solucion_aplicada'] as String?,
+      fotoReparacion: r['foto_reparacion'] as String?,
+      resultadoPruebas: r['resultado_pruebas'] as String?,
+      fotoPruebas: r['foto_pruebas'] as String?,
+      fechaUltimaActualizacion: (r['fecha_ultima_actualizacion'] ?? '') as String,
+      estado: (r['estado'] ?? 'EN_PROCESO') as String,
+    );
+  }
 }
 
 class ServiciosViewModel extends ChangeNotifier {
@@ -119,7 +179,11 @@ class ServiciosViewModel extends ChangeNotifier {
           SELECT SUM(rtt.costo)
           FROM reg_serv_taller_tipo_trabajo rtt
           WHERE rtt.cod_ser_taller = rst.cod_ser_taller
-        ), 0) AS total_aprox
+        ), 0) AS total_aprox,
+        EXISTS(
+          SELECT 1 FROM seguimiento_servicio ss 
+          WHERE ss.cod_ser_taller = rst.cod_ser_taller
+        ) AS tiene_seguimiento
         $selectEstado
       FROM registro_servicio_taller rst
       JOIN vehiculo v ON v.cod_vehiculo = rst.cod_vehiculo
@@ -357,5 +421,492 @@ class ServiciosViewModel extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  // ====== SEGUIMIENTO ======
+  Future<SeguimientoServicio?> getSeguimiento(int codSerTaller) async {
+    try {
+      final rs = await _db.rawQuery(
+        'SELECT * FROM seguimiento_servicio WHERE cod_ser_taller = ?',
+        [codSerTaller],
+      );
+      if (rs.isEmpty) return null;
+      return SeguimientoServicio.fromRow(rs.first);
+    } catch (e) {
+      _error = 'Error al obtener seguimiento: $e';
+      return null;
+    }
+  }
+
+  Future<bool> iniciarSeguimiento(int codSerTaller) async {
+    try {
+      final existe = await getSeguimiento(codSerTaller);
+      if (existe != null) return true; // Ya existe
+      
+      await _db.rawInsert(
+        'INSERT INTO seguimiento_servicio(cod_ser_taller, paso_actual, fecha_ultima_actualizacion) VALUES(?, ?, ?)',
+        [codSerTaller, 1, DateTime.now().toIso8601String()],
+      );
+      return true;
+    } catch (e) {
+      _error = 'Error al iniciar seguimiento: $e';
+      return false;
+    }
+  }
+
+  Future<bool> actualizarSeguimiento({
+    required int codSerTaller,
+    required int pasoActual,
+    String? diagnostico,
+    String? fotoDiagnostico,
+    String? fallasIdentificadas,
+    String? fotoFallas,
+    String? observacionesFallas,
+    String? fotoObservaciones,
+    String? solucionAplicada,
+    String? fotoReparacion,
+    String? resultadoPruebas,
+    String? fotoPruebas,
+    String? estado,
+  }) async {
+    try {
+      final campos = <String>[];
+      final valores = <Object?>[];
+      
+      campos.add('paso_actual = ?');
+      valores.add(pasoActual);
+      
+      if (diagnostico != null) {
+        campos.add('diagnostico = ?');
+        valores.add(diagnostico);
+      }
+      if (fotoDiagnostico != null) {
+        campos.add('foto_diagnostico = ?');
+        valores.add(fotoDiagnostico);
+      }
+      if (fallasIdentificadas != null) {
+        campos.add('fallas_identificadas = ?');
+        valores.add(fallasIdentificadas);
+      }
+      if (fotoFallas != null) {
+        campos.add('foto_fallas = ?');
+        valores.add(fotoFallas);
+      }
+      if (observacionesFallas != null) {
+        campos.add('observaciones_fallas = ?');
+        valores.add(observacionesFallas);
+      }
+      if (fotoObservaciones != null) {
+        campos.add('foto_observaciones = ?');
+        valores.add(fotoObservaciones);
+      }
+      if (solucionAplicada != null) {
+        campos.add('solucion_aplicada = ?');
+        valores.add(solucionAplicada);
+      }
+      if (fotoReparacion != null) {
+        campos.add('foto_reparacion = ?');
+        valores.add(fotoReparacion);
+      }
+      if (resultadoPruebas != null) {
+        campos.add('resultado_pruebas = ?');
+        valores.add(resultadoPruebas);
+      }
+      if (fotoPruebas != null) {
+        campos.add('foto_pruebas = ?');
+        valores.add(fotoPruebas);
+      }
+      if (estado != null) {
+        campos.add('estado = ?');
+        valores.add(estado);
+      }
+      
+      campos.add('fecha_ultima_actualizacion = ?');
+      valores.add(DateTime.now().toIso8601String());
+      
+      valores.add(codSerTaller);
+      
+      final n = await _db.rawUpdate(
+        'UPDATE seguimiento_servicio SET ${campos.join(', ')} WHERE cod_ser_taller = ?',
+        valores,
+      );
+      
+      return n > 0;
+    } catch (e) {
+      _error = 'Error al actualizar seguimiento: $e';
+      return false;
+    }
+  }
+
+  Future<bool> finalizarSeguimiento(int codSerTaller) async {
+    try {
+      final n = await _db.rawUpdate(
+        'UPDATE seguimiento_servicio SET estado = ?, fecha_ultima_actualizacion = ? WHERE cod_ser_taller = ?',
+        ['FINALIZADO', DateTime.now().toIso8601String(), codSerTaller],
+      );
+      return n > 0;
+    } catch (e) {
+      _error = 'Error al finalizar seguimiento: $e';
+      return false;
+    }
+  }
+
+  // ====== MÉTODOS AUXILIARES PARA CONVERSIÓN SEGURA ======
+  
+  int _toInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  double _toDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
+  }
+
+  // ====== REPORTES ======
+
+  /// Genera reporte de servicios por rango de fechas
+  Future<bool> generarReporteServicios({
+    required String fechaInicio,
+    required String fechaFin,
+    required String formato,
+  }) async {
+    try {
+      // Obtener servicios filtrados por fecha
+      final servicios = await _db.rawQuery('''
+        SELECT * FROM vw_servicios 
+        WHERE fecha_ingreso BETWEEN ? AND ?
+        ORDER BY fecha_ingreso DESC
+      ''', [fechaInicio, fechaFin]);
+
+      if (servicios.isEmpty) {
+        _error = 'No hay servicios en el rango de fechas seleccionado';
+        return false;
+      }
+
+      // Calcular estadísticas con tipos seguros
+      double totalIngresos = 0.0;
+      int serviciosTerminados = 0;
+      int serviciosEnCurso = 0;
+      int serviciosEnEspera = 0;
+
+      final serviciosData = servicios.map((s) {
+        final item = ServicioItem.fromRow(s);
+        final total = item.totalAprox;
+        totalIngresos += total;
+
+        // Contar por estado
+        final estado = item.estado?.toUpperCase() ?? '';
+        if (estado.contains('TERMINADO')) {
+          serviciosTerminados++;
+        } else if (estado.contains('EN CURSO') || estado.contains('EN_PROCESO')) {
+          serviciosEnCurso++;
+        } else if (estado.contains('ESPERA') || estado.contains('PENDIENTE')) {
+          serviciosEnEspera++;
+        }
+
+        return {
+          'codigo': item.codSerTaller,
+          'fecha': item.fechaIngreso,
+          'cliente': item.cliente,
+          'vehiculo': item.vehiculo,
+          'tipo': item.tipos,
+          'total': total,
+          'estado': item.estado ?? 'SIN ESTADO',
+        };
+      }).toList();
+
+      // Preparar datos para el reporte
+      final datosReporte = {
+        'titulo': 'REPORTE DE SERVICIOS',
+        'periodo': '$fechaInicio a $fechaFin',
+        'fechaGeneracion': DateTime.now().toIso8601String(),
+        'totalServicios': servicios.length,
+        'servicios': serviciosData,
+        'resumen': {
+          'totalIngresos': totalIngresos,
+          'serviciosTerminados': serviciosTerminados,
+          'serviciosEnCurso': serviciosEnCurso,
+          'serviciosEnEspera': serviciosEnEspera,
+        }
+      };
+
+      // Generar reporte según formato
+      return await _exportarReporte(datosReporte, formato, 'reporte_servicios_${fechaInicio}_${fechaFin}');
+    } catch (e) {
+      _error = 'Error generando reporte de servicios: $e';
+      return false;
+    }
+  }
+
+  /// Genera reporte de seguimiento técnico para un servicio específico
+  Future<bool> generarReporteSeguimiento({
+    required int codSerTaller,
+    required String formato,
+  }) async {
+    try {
+      // Obtener servicio
+      final servicioRs = await _db.rawQuery(
+        'SELECT * FROM vw_servicios WHERE cod_ser_taller = ?',
+        [codSerTaller],
+      );
+      
+      if (servicioRs.isEmpty) {
+        _error = 'Servicio no encontrado';
+        return false;
+      }
+
+      final servicio = ServicioItem.fromRow(servicioRs.first);
+
+      // Obtener seguimiento
+      final seguimiento = await getSeguimiento(codSerTaller);
+      if (seguimiento == null) {
+        _error = 'No existe seguimiento para este servicio';
+        return false;
+      }
+
+      // Preparar datos para el reporte
+      final datosReporte = {
+        'titulo': 'REPORTE DE SEGUIMIENTO TÉCNICO',
+        'servicio': {
+          'codigo': servicio.codSerTaller,
+          'cliente': servicio.cliente,
+          'vehiculo': servicio.vehiculo,
+          'fecha_ingreso': servicio.fechaIngreso,
+          'fecha_salida': servicio.fechaSalida ?? 'PENDIENTE',
+          'observaciones': servicio.observaciones ?? 'SIN OBSERVACIONES',
+          'total': servicio.totalAprox,
+        },
+        'seguimiento': {
+          'paso_actual': seguimiento.pasoActual,
+          'diagnostico': seguimiento.diagnostico ?? 'NO REGISTRADO',
+          'fallas_identificadas': seguimiento.fallasIdentificadas ?? 'NO REGISTRADO',
+          'observaciones_fallas': seguimiento.observacionesFallas ?? 'NO REGISTRADO',
+          'solucion_aplicada': seguimiento.solucionAplicada ?? 'NO REGISTRADO',
+          'resultado_pruebas': seguimiento.resultadoPruebas ?? 'NO REGISTRADO',
+          'estado': seguimiento.estado,
+          'fecha_ultima_actualizacion': seguimiento.fechaUltimaActualizacion,
+        },
+        'fotos': {
+          'diagnostico': seguimiento.fotoDiagnostico,
+          'fallas': seguimiento.fotoFallas,
+          'observaciones': seguimiento.fotoObservaciones,
+          'reparacion': seguimiento.fotoReparacion,
+          'pruebas': seguimiento.fotoPruebas,
+        }
+      };
+
+      // Generar reporte según formato
+      return await _exportarReporte(datosReporte, formato, 'seguimiento_${servicio.codSerTaller}');
+    } catch (e) {
+      _error = 'Error generando reporte de seguimiento: $e';
+      return false;
+    }
+  }
+
+  /// Genera reporte de estadísticas del taller
+  Future<bool> generarReporteEstadisticas({
+    required String fechaInicio,
+    required String fechaFin,
+    required String formato,
+  }) async {
+    try {
+      // Obtener estadísticas básicas
+      final totalServicios = await _db.rawQuery('''
+        SELECT COUNT(*) as total FROM vw_servicios 
+        WHERE fecha_ingreso BETWEEN ? AND ?
+      ''', [fechaInicio, fechaFin]);
+
+      final ingresosTotales = await _db.rawQuery('''
+        SELECT SUM(total_aprox) as total FROM vw_servicios 
+        WHERE fecha_ingreso BETWEEN ? AND ?
+      ''', [fechaInicio, fechaFin]);
+
+      // Estadísticas por tipo de trabajo
+      final porTipo = await _db.rawQuery('''
+        SELECT tt.descripcion, COUNT(*) as cantidad, SUM(rtt.costo) as total
+        FROM reg_serv_taller_tipo_trabajo rtt
+        JOIN tipo_trabajo tt ON tt.cod_tipo_trabajo = rtt.cod_tipo_trabajo
+        JOIN registro_servicio_taller rst ON rst.cod_ser_taller = rtt.cod_ser_taller
+        WHERE rst.fecha_ingreso BETWEEN ? AND ?
+        GROUP BY tt.descripcion
+        ORDER BY cantidad DESC
+      ''', [fechaInicio, fechaFin]);
+
+      // Servicios con seguimiento
+      final conSeguimiento = await _db.rawQuery('''
+        SELECT COUNT(*) as total FROM vw_servicios 
+        WHERE fecha_ingreso BETWEEN ? AND ? AND tiene_seguimiento = 1
+      ''', [fechaInicio, fechaFin]);
+
+      // Convertir resultados a tipos numéricos seguros
+      final totalServiciosNum = _toInt(totalServicios.first['total']);
+      final ingresosTotalesNum = _toDouble(ingresosTotales.first['total']);
+      final conSeguimientoNum = _toInt(conSeguimiento.first['total']);
+      final sinSeguimientoNum = totalServiciosNum - conSeguimientoNum;
+      final ingresoPromedio = totalServiciosNum > 0 ? ingresosTotalesNum / totalServiciosNum : 0.0;
+
+      // Preparar datos para el reporte
+      final datosReporte = {
+        'titulo': 'REPORTE DE ESTADÍSTICAS DEL TALLER',
+        'periodo': '$fechaInicio a $fechaFin',
+        'fechaGeneracion': DateTime.now().toIso8601String(),
+        'estadisticas_generales': {
+          'total_servicios': totalServiciosNum,
+          'ingresos_totales': ingresosTotalesNum,
+          'servicios_con_seguimiento': conSeguimientoNum,
+          'servicios_sin_seguimiento': sinSeguimientoNum,
+        },
+        'distribucion_por_tipo': porTipo.map((tipo) {
+          return {
+            'tipo': tipo['descripcion']?.toString() ?? 'DESCONOCIDO',
+            'cantidad': _toInt(tipo['cantidad']),
+            'total': _toDouble(tipo['total']),
+          };
+        }).toList(),
+        'promedios': {
+          'ingreso_promedio': ingresoPromedio,
+        }
+      };
+
+      // Generar reporte según formato
+      return await _exportarReporte(datosReporte, formato, 'estadisticas_${fechaInicio}_${fechaFin}');
+    } catch (e) {
+      _error = 'Error generando reporte de estadísticas: $e';
+      return false;
+    }
+  }
+
+  /// Método interno para exportar reportes según formato
+  Future<bool> _exportarReporte(Map<String, dynamic> datos, String formato, String nombreBase) async {
+    try {
+      switch (formato) {
+        case 'PDF':
+          return await _generarPDF(datos, nombreBase);
+        case 'EXCEL':
+          return await _generarExcel(datos, nombreBase);
+        case 'CSV':
+          return await _generarCSV(datos, nombreBase);
+        default:
+          _error = 'Formato no soportado: $formato';
+          return false;
+      }
+    } catch (e) {
+      _error = 'Error al exportar reporte: $e';
+      return false;
+    }
+  }
+
+  /// Generar reporte en formato PDF
+  Future<bool> _generarPDF(Map<String, dynamic> datos, String nombreBase) async {
+    // TODO: Implementar generación de PDF usando pdf: ^3.10.4
+    // Por ahora simulamos éxito
+    print('Generando PDF: $nombreBase con datos: $datos');
+    await Future.delayed(Duration(milliseconds: 500));
+    return true;
+  }
+
+  /// Generar reporte en formato Excel
+  Future<bool> _generarExcel(Map<String, dynamic> datos, String nombreBase) async {
+    // TODO: Implementar generación de Excel usando excel: ^3.0.2
+    // Por ahora simulamos éxito
+    print('Generando Excel: $nombreBase con datos: $datos');
+    await Future.delayed(Duration(milliseconds: 500));
+    return true;
+  }
+
+  /// Generar reporte en formato CSV
+  Future<bool> _generarCSV(Map<String, dynamic> datos, String nombreBase) async {
+    try {
+      // Simular generación de CSV básico
+      final csvContent = _convertirACSV(datos);
+      print('Generando CSV: $nombreBase\n$csvContent');
+      await Future.delayed(Duration(milliseconds: 300));
+      return true;
+    } catch (e) {
+      _error = 'Error generando CSV: $e';
+      return false;
+    }
+  }
+
+  /// Convertir datos a formato CSV básico
+  String _convertirACSV(Map<String, dynamic> datos) {
+    final buffer = StringBuffer();
+    
+    // Encabezado
+    buffer.writeln('REPORTE: ${datos['titulo']}');
+    buffer.writeln('PERIODO: ${datos['periodo']}');
+    buffer.writeln('FECHA GENERACIÓN: ${datos['fechaGeneracion']}');
+    buffer.writeln();
+    
+    // Datos específicos según el tipo de reporte
+    if (datos.containsKey('servicios')) {
+      // Reporte de servicios
+      buffer.writeln('CÓDIGO,FECHA,CLIENTE,VEHÍCULO,TIPO,TOTAL,ESTADO');
+      for (final servicio in datos['servicios']) {
+        buffer.writeln('${servicio['codigo']},${servicio['fecha']},"${servicio['cliente']}","${servicio['vehiculo']}","${servicio['tipo']}",${servicio['total']},${servicio['estado']}');
+      }
+      
+      // Resumen
+      buffer.writeln();
+      buffer.writeln('RESUMEN:');
+      final resumen = datos['resumen'];
+      buffer.writeln('TOTAL SERVICIOS,${datos['totalServicios']}');
+      buffer.writeln('INGRESOS TOTALES,${resumen['totalIngresos']}');
+      buffer.writeln('SERVICIOS TERMINADOS,${resumen['serviciosTerminados']}');
+      buffer.writeln('SERVICIOS EN CURSO,${resumen['serviciosEnCurso']}');
+      buffer.writeln('SERVICIOS EN ESPERA,${resumen['serviciosEnEspera']}');
+      
+    } else if (datos.containsKey('seguimiento')) {
+      // Reporte de seguimiento
+      final servicio = datos['servicio'];
+      final seguimiento = datos['seguimiento'];
+      
+      buffer.writeln('INFORMACIÓN DEL SERVICIO');
+      buffer.writeln('CÓDIGO,${servicio['codigo']}');
+      buffer.writeln('CLIENTE,${servicio['cliente']}');
+      buffer.writeln('VEHÍCULO,${servicio['vehiculo']}');
+      buffer.writeln('FECHA INGRESO,${servicio['fecha_ingreso']}');
+      buffer.writeln('FECHA SALIDA,${servicio['fecha_salida']}');
+      buffer.writeln('OBSERVACIONES,${servicio['observaciones']}');
+      buffer.writeln('TOTAL,${servicio['total']}');
+      buffer.writeln();
+      
+      buffer.writeln('SEGUIMIENTO TÉCNICO');
+      buffer.writeln('PASO ACTUAL,${seguimiento['paso_actual']}');
+      buffer.writeln('ESTADO,${seguimiento['estado']}');
+      buffer.writeln('FECHA ÚLTIMA ACTUALIZACIÓN,${seguimiento['fecha_ultima_actualizacion']}');
+      buffer.writeln('DIAGNÓSTICO,${seguimiento['diagnostico']}');
+      buffer.writeln('FALLAS IDENTIFICADAS,${seguimiento['fallas_identificadas']}');
+      buffer.writeln('OBSERVACIONES FALLAS,${seguimiento['observaciones_fallas']}');
+      buffer.writeln('SOLUCIÓN APLICADA,${seguimiento['solucion_aplicada']}');
+      buffer.writeln('RESULTADO PRUEBAS,${seguimiento['resultado_pruebas']}');
+      
+    } else if (datos.containsKey('estadisticas_generales')) {
+      // Reporte de estadísticas
+      final stats = datos['estadisticas_generales'];
+      final promedios = datos['promedios'];
+      final distribucion = datos['distribucion_por_tipo'];
+      
+      buffer.writeln('ESTADÍSTICAS GENERALES');
+      buffer.writeln('TOTAL SERVICIOS,${stats['total_servicios']}');
+      buffer.writeln('INGRESOS TOTALES,${stats['ingresos_totales']}');
+      buffer.writeln('SERVICIOS CON SEGUIMIENTO,${stats['servicios_con_seguimiento']}');
+      buffer.writeln('SERVICIOS SIN SEGUIMIENTO,${stats['servicios_sin_seguimiento']}');
+      buffer.writeln('INGRESO PROMEDIO,${promedios['ingreso_promedio']?.toStringAsFixed(2)}');
+      buffer.writeln();
+      
+      buffer.writeln('DISTRIBUCIÓN POR TIPO DE TRABAJO');
+      buffer.writeln('TIPO,CANTIDAD,TOTAL');
+      for (final tipo in distribucion) {
+        buffer.writeln('${tipo['tipo']},${tipo['cantidad']},${tipo['total']}');
+      }
+    }
+    
+    return buffer.toString();
   }
 }

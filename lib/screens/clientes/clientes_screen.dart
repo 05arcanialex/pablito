@@ -197,11 +197,6 @@ class _ClientesScreenBodyState extends State<_ClientesScreenBody> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        tooltip: 'VER',
-                        icon: const Icon(Icons.visibility, color: AppColors.secondary),
-                        onPressed: () => _onVerCliente(vm, c),
-                      ),
-                      IconButton(
                         tooltip: 'EDITAR',
                         icon: const Icon(Icons.edit, color: AppColors.primary),
                         onPressed: () => _onEditarCliente(vm, c),
@@ -568,7 +563,7 @@ class _BSClienteDetalleState extends State<BSClienteDetalle> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FORMULARIOS (CLIENTE Y VEHÍCULO)
+// FORMULARIOS (CLIENTE Y VEHÍCULO) - EL RESTO DEL CÓDIGO PERMANECE IGUAL
 // ──────────────────────────────────────────────────────────────────────────────
 class _ClienteFormResult {
   final String nombre;
@@ -614,63 +609,253 @@ class _DlgClienteState extends State<_DlgCliente> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: Form(
-        key: _f,
-        child: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _nombre,
-                decoration: const InputDecoration(labelText: 'NOMBRE *', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-              ),
-              const SizedBox(height: AppSpacing.medium),
-              TextFormField(
-                controller: _apellidos,
-                decoration: const InputDecoration(labelText: 'APELLIDOS *', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-              ),
-              const SizedBox(height: AppSpacing.medium),
-              TextFormField(
-                controller: _telefono,
-                decoration: const InputDecoration(labelText: 'TELÉFONO', border: OutlineInputBorder()),
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: AppSpacing.medium),
-              TextFormField(
-                controller: _email,
-                decoration: const InputDecoration(labelText: 'EMAIL', border: OutlineInputBorder()),
-                keyboardType: TextInputType.emailAddress,
-              ),
-            ],
-          ),
+  // VALIDACIÓN PARA SOLO LETRAS Y ESPACIOS
+  String? _validarSoloLetras(String? value, String campo) {
+    if (value == null || value.trim().isEmpty) {
+      return 'REQUERIDO';
+    }
+    
+    // Expresión regular que solo permite letras (incluyendo acentos) y espacios
+    final regex = RegExp(r'^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$');
+    if (!regex.hasMatch(value)) {
+      return '$campo solo puede contener letras y espacios';
+    }
+    
+    return null;
+  }
+
+  // VALIDACIÓN PARA TELÉFONO
+  String? _validarTelefono(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null; // Teléfono es opcional
+    }
+    
+    final telefono = value.trim();
+    
+    // Validar que solo contenga números
+    if (!RegExp(r'^[0-9]+$').hasMatch(telefono)) {
+      return 'El teléfono solo puede contener números';
+    }
+    
+    // Validar que comience con 6, 7 o 2
+    if (!telefono.startsWith(RegExp(r'[672]'))) {
+      return 'El teléfono debe comenzar con 6, 7 o 2';
+    }
+    
+    // Validar longitud de 8 dígitos
+    if (telefono.length != 8) {
+      return 'El teléfono debe tener 8 dígitos';
+    }
+    
+    return null;
+  }
+
+  // VALIDACIÓN PARA EMAIL
+  String? _validarEmail(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null; // Email es opcional
+    }
+    
+    final email = value.trim();
+    
+    // Expresión regular básica para validar email
+    final regex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    if (!regex.hasMatch(email)) {
+      return 'Ingrese un email válido';
+    }
+    
+    return null;
+  }
+
+  // Widget para mostrar instrucciones debajo de cada campo
+  Widget _buildInstruccion(String texto) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(
+        texto,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Colors.grey,
+          fontStyle: FontStyle.italic,
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-        ElevatedButton(
-          onPressed: () {
-            if (!_f.currentState!.validate()) return;
-            Navigator.pop(
-              context,
-              _ClienteFormResult(
-                nombre: _nombre.text.trim().toUpperCase(),
-                apellidos: _apellidos.text.trim().toUpperCase(),
-                telefono: _telefono.text.trim().isEmpty ? null : _telefono.text.trim(),
-                email: _email.text.trim().isEmpty ? null : _email.text.trim(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 450, maxHeight: 650),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // HEADER
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
               ),
-            );
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-          child: const Text('GUARDAR'),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            
+            // CONTENIDO SCROLLABLE
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Form(
+                  key: _f,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // NOMBRE
+                      TextFormField(
+                        controller: _nombre,
+                        decoration: const InputDecoration(
+                          labelText: 'NOMBRE *', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: 'JUAN CARLOS',
+                        ),
+                        validator: (v) => _validarSoloLetras(v, 'Nombre'),
+                        textCapitalization: TextCapitalization.words,
+                        onChanged: (value) {
+                          final cursorPosition = _nombre.selection.base.offset;
+                          _nombre.value = _nombre.value.copyWith(
+                            text: value.toUpperCase(),
+                            selection: TextSelection.collapsed(offset: cursorPosition),
+                          );
+                        },
+                      ),
+                      _buildInstruccion('Solo letras y espacios, sin números'),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      // APELLIDOS
+                      TextFormField(
+                        controller: _apellidos,
+                        decoration: const InputDecoration(
+                          labelText: 'APELLIDOS *', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: 'PÉREZ GARCÍA',
+                        ),
+                        validator: (v) => _validarSoloLetras(v, 'Apellidos'),
+                        textCapitalization: TextCapitalization.words,
+                        onChanged: (value) {
+                          final cursorPosition = _apellidos.selection.base.offset;
+                          _apellidos.value = _apellidos.value.copyWith(
+                            text: value.toUpperCase(),
+                            selection: TextSelection.collapsed(offset: cursorPosition),
+                          );
+                        },
+                      ),
+                      _buildInstruccion('Solo letras y espacios, sin números'),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      // TELÉFONO
+                      TextFormField(
+                        controller: _telefono,
+                        decoration: const InputDecoration(
+                          labelText: 'TELÉFONO', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: '71234567',
+                        ),
+                        keyboardType: TextInputType.phone,
+                        validator: _validarTelefono,
+                        maxLength: 8,
+                        buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                      ),
+                      _buildInstruccion('8 dígitos, debe comenzar con 6, 7 o 2'),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      // EMAIL
+                      TextFormField(
+                        controller: _email,
+                        decoration: const InputDecoration(
+                          labelText: 'EMAIL', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: 'ejemplo@correo.com',
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                        validator: _validarEmail,
+                      ),
+                      _buildInstruccion('Formato válido: usuario@dominio.com'),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            
+            // BOTONES
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(12),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('CANCELAR'),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: () {
+                      if (!_f.currentState!.validate()) return;
+                      Navigator.pop(
+                        context,
+                        _ClienteFormResult(
+                          nombre: _nombre.text.trim().toUpperCase(),
+                          apellidos: _apellidos.text.trim().toUpperCase(),
+                          telefono: _telefono.text.trim().isEmpty ? null : _telefono.text.trim(),
+                          email: _email.text.trim().isEmpty ? null : _email.text.trim(),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary, 
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    child: const Text('GUARDAR'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -744,102 +929,435 @@ class _DlgVehiculoState extends State<_DlgVehiculo> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: Form(
-        key: _f,
-        child: SizedBox(
-          width: 460,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _marca,
-                    decoration: const InputDecoration(labelText: 'MARCA *', border: OutlineInputBorder()),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextFormField(
-                    controller: _modelo,
-                    decoration: const InputDecoration(labelText: 'MODELO *', border: OutlineInputBorder()),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-                  ),
-                ),
-              ]),
-              const SizedBox(height: AppSpacing.medium),
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _anio,
-                    decoration: const InputDecoration(labelText: 'AÑO', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextFormField(
-                    controller: _placa,
-                    decoration: const InputDecoration(labelText: 'PLACA *', border: OutlineInputBorder()),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-                  ),
-                ),
-              ]),
-              const SizedBox(height: AppSpacing.medium),
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _color,
-                    decoration: const InputDecoration(labelText: 'COLOR *', border: OutlineInputBorder()),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'REQUERIDO' : null,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextFormField(
-                    controller: _km,
-                    decoration: const InputDecoration(labelText: 'KILOMETRAJE', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-              ]),
-              const SizedBox(height: AppSpacing.medium),
-              TextFormField(
-                controller: _serie,
-                decoration: const InputDecoration(labelText: 'N° SERIE / VIN', border: OutlineInputBorder()),
-              ),
-            ],
-          ),
+  // VALIDACIONES PARA VEHÍCULO
+
+  // Validación para MARCA - solo letras mayúsculas, sin números
+  String? _validarMarca(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'La marca es requerida';
+    }
+    
+    final marca = value.trim().toUpperCase();
+    
+    // Solo letras (incluyendo acentos) y espacios
+    final regex = RegExp(r'^[A-ZÁÉÍÓÚÑÜ\s]+$');
+    if (!regex.hasMatch(marca)) {
+      return 'La marca solo puede contener letras mayúsculas';
+    }
+    
+    return null;
+  }
+
+  // Validación para MODELO - solo letras mayúsculas, sin números
+  String? _validarModelo(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'El modelo es requerido';
+    }
+    
+    final modelo = value.trim().toUpperCase();
+    
+    // Solo letras (incluyendo acentos), números, y espacios
+    final regex = RegExp(r'^[A-ZÁÉÍÓÚÑÜ0-9\s]+$');
+    if (!regex.hasMatch(modelo)) {
+      return 'El modelo solo puede contener letras mayúsculas y números';
+    }
+    
+    return null;
+  }
+
+  // Validación para AÑO - solo números, exactamente 4 dígitos, año válido
+  String? _validarAnio(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null; // Año es opcional
+    }
+    
+    final anio = value.trim();
+    
+    // Solo números
+    if (!RegExp(r'^[0-9]+$').hasMatch(anio)) {
+      return 'El año solo puede contener números';
+    }
+    
+    // Exactamente 4 dígitos
+    if (anio.length != 4) {
+      return 'El año debe tener 4 dígitos';
+    }
+    
+    // Validar que sea un año válido (entre 1900 y año actual + 1)
+    final anioNum = int.tryParse(anio);
+    final anioActual = DateTime.now().year;
+    if (anioNum == null || anioNum < 1900 || anioNum > anioActual + 1) {
+      return 'Ingrese un año válido (1900-${anioActual + 1})';
+    }
+    
+    return null;
+  }
+
+  // Validación para PLACA - 4 dígitos + 3 letras mayúsculas sin espacio
+  String? _validarPlaca(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'La placa es requerida';
+    }
+    
+    final placa = value.trim().toUpperCase();
+    
+    // Formato: 4 dígitos seguidos de 3 letras mayúsculas
+    final regex = RegExp(r'^[0-9]{4}[A-Z]{3}$');
+    if (!regex.hasMatch(placa)) {
+      return 'Formato: 4 dígitos + 3 letras mayúsculas (ej: 1234ABC)';
+    }
+    
+    return null;
+  }
+
+  // Validación para COLOR - solo letras mayúsculas, sin números
+  String? _validarColor(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'El color es requerido';
+    }
+    
+    final color = value.trim().toUpperCase();
+    
+    // Solo letras (incluyendo acentos) y espacios
+    final regex = RegExp(r'^[A-ZÁÉÍÓÚÑÜ\s]+$');
+    if (!regex.hasMatch(color)) {
+      return 'El color solo puede contener letras mayúsculas';
+    }
+    
+    return null;
+  }
+
+  // Validación para KILOMETRAJE - solo números, máximo 6 dígitos
+  String? _validarKilometraje(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null; // Kilometraje es opcional
+    }
+    
+    final km = value.trim();
+    
+    // Solo números
+    if (!RegExp(r'^[0-9]+$').hasMatch(km)) {
+      return 'El kilometraje solo puede contener números';
+    }
+    
+    // Máximo 6 dígitos
+    if (km.length > 6) {
+      return 'Máximo 6 dígitos para kilometraje';
+    }
+    
+    return null;
+  }
+
+  // Validación para N° SERIE / VIN - exactamente 17 caracteres, letras mayúsculas y números
+  String? _validarNumeroSerie(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null; // Número de serie es opcional
+    }
+    
+    final serie = value.trim().toUpperCase();
+    
+    // Exactamente 17 caracteres
+    if (serie.length != 17) {
+      return 'El número de serie debe tener 17 caracteres';
+    }
+    
+    // Solo letras mayúsculas y números (sin I, O, Q para evitar confusión)
+    final regex = RegExp(r'^[A-HJ-NPR-Z0-9]{17}$');
+    if (!regex.hasMatch(serie)) {
+      return 'Solo letras mayúsculas y números (sin I, O, Q)';
+    }
+    
+    return null;
+  }
+
+  // Widget para mostrar instrucciones debajo de cada campo
+  Widget _buildInstruccion(String texto) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(
+        texto,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Colors.grey,
+          fontStyle: FontStyle.italic,
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-        ElevatedButton(
-          onPressed: () {
-            if (!_f.currentState!.validate()) return;
-            Navigator.pop(
-              context,
-              _VehiculoFormResult(
-                codVehiculo: widget.initial?.codVehiculo,
-                marca: _marca.text.trim().toUpperCase(),
-                modelo: _modelo.text.trim().toUpperCase(),
-                anio: _anio.text.trim().isEmpty ? null : int.tryParse(_anio.text.trim()),
-                placas: _placa.text.trim().toUpperCase(),
-                color: _color.text.trim().toUpperCase(),
-                kilometraje: _km.text.trim().isEmpty ? null : int.tryParse(_km.text.trim()),
-                numeroSerie: _serie.text.trim().isEmpty ? null : _serie.text.trim().toUpperCase(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 700),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // HEADER
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
               ),
-            );
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-          child: const Text('GUARDAR'),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            
+            // CONTENIDO SCROLLABLE
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Form(
+                  key: _f,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // MARCA
+                      TextFormField(
+                        controller: _marca,
+                        decoration: const InputDecoration(
+                          labelText: 'MARCA *', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: 'TOYOTA',
+                        ),
+                        validator: _validarMarca,
+                        textCapitalization: TextCapitalization.characters,
+                        onChanged: (value) {
+                          final cursorPosition = _marca.selection.base.offset;
+                          _marca.value = _marca.value.copyWith(
+                            text: value.toUpperCase(),
+                            selection: TextSelection.collapsed(offset: cursorPosition),
+                          );
+                        },
+                      ),
+                      _buildInstruccion('Solo letras mayúsculas, sin números'),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      // MODELO
+                      TextFormField(
+                        controller: _modelo,
+                        decoration: const InputDecoration(
+                          labelText: 'MODELO *', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: 'COROLLA',
+                        ),
+                        validator: _validarModelo,
+                        textCapitalization: TextCapitalization.characters,
+                        onChanged: (value) {
+                          final cursorPosition = _modelo.selection.base.offset;
+                          _modelo.value = _modelo.value.copyWith(
+                            text: value.toUpperCase(),
+                            selection: TextSelection.collapsed(offset: cursorPosition),
+                          );
+                        },
+                      ),
+                      _buildInstruccion('Letras mayúsculas y números permitidos'),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      Row(children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              // AÑO
+                              TextFormField(
+                                controller: _anio,
+                                decoration: const InputDecoration(
+                                  labelText: 'AÑO', 
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                                  hintText: '2023',
+                                ),
+                                keyboardType: TextInputType.number,
+                                validator: _validarAnio,
+                                maxLength: 4,
+                                buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                              ),
+                              _buildInstruccion('4 dígitos (1900-${DateTime.now().year + 1})'),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              // PLACA
+                              TextFormField(
+                                controller: _placa,
+                                decoration: const InputDecoration(
+                                  labelText: 'PLACA *', 
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                                  hintText: '1234ABC',
+                                ),
+                                validator: _validarPlaca,
+                                textCapitalization: TextCapitalization.characters,
+                                onChanged: (value) {
+                                  final cursorPosition = _placa.selection.base.offset;
+                                  _placa.value = _placa.value.copyWith(
+                                    text: value.toUpperCase(),
+                                    selection: TextSelection.collapsed(offset: cursorPosition),
+                                  );
+                                },
+                              ),
+                              _buildInstruccion('4 dígitos + 3 letras (ej: 1234ABC)'),
+                            ],
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      Row(children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              // COLOR
+                              TextFormField(
+                                controller: _color,
+                                decoration: const InputDecoration(
+                                  labelText: 'COLOR *', 
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                                  hintText: 'ROJO',
+                                ),
+                                validator: _validarColor,
+                                textCapitalization: TextCapitalization.characters,
+                                onChanged: (value) {
+                                  final cursorPosition = _color.selection.base.offset;
+                                  _color.value = _color.value.copyWith(
+                                    text: value.toUpperCase(),
+                                    selection: TextSelection.collapsed(offset: cursorPosition),
+                                  );
+                                },
+                              ),
+                              _buildInstruccion('Solo letras mayúsculas'),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              // KILOMETRAJE
+                              TextFormField(
+                                controller: _km,
+                                decoration: const InputDecoration(
+                                  labelText: 'KILOMETRAJE', 
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                                  hintText: '15000',
+                                ),
+                                keyboardType: TextInputType.number,
+                                validator: _validarKilometraje,
+                                maxLength: 6,
+                                buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                              ),
+                              _buildInstruccion('Máximo 6 dígitos'),
+                            ],
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: AppSpacing.medium),
+
+                      // N° SERIE / VIN
+                      TextFormField(
+                        controller: _serie,
+                        decoration: const InputDecoration(
+                          labelText: 'N° SERIE / VIN', 
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          hintText: '1HGCM82633A123456',
+                        ),
+                        validator: _validarNumeroSerie,
+                        textCapitalization: TextCapitalization.characters,
+                        maxLength: 17,
+                        onChanged: (value) {
+                          final cursorPosition = _serie.selection.base.offset;
+                          _serie.value = _serie.value.copyWith(
+                            text: value.toUpperCase(),
+                            selection: TextSelection.collapsed(offset: cursorPosition),
+                          );
+                        },
+                      ),
+                      _buildInstruccion('17 caracteres (letras y números, sin I,O,Q)'),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            
+            // BOTONES
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(12),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('CANCELAR'),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: () {
+                      if (!_f.currentState!.validate()) return;
+                      Navigator.pop(
+                        context,
+                        _VehiculoFormResult(
+                          codVehiculo: widget.initial?.codVehiculo,
+                          marca: _marca.text.trim().toUpperCase(),
+                          modelo: _modelo.text.trim().toUpperCase(),
+                          anio: _anio.text.trim().isEmpty ? null : int.tryParse(_anio.text.trim()),
+                          placas: _placa.text.trim().toUpperCase(),
+                          color: _color.text.trim().toUpperCase(),
+                          kilometraje: _km.text.trim().isEmpty ? null : int.tryParse(_km.text.trim()),
+                          numeroSerie: _serie.text.trim().isEmpty ? null : _serie.text.trim().toUpperCase(),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary, 
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    child: const Text('GUARDAR'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

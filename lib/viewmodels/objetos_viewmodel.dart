@@ -358,6 +358,74 @@ class ObjetosViewModel extends ChangeNotifier {
     }
   }
 
+  // ---------- ELIMINAR TODOS LOS OBJETOS DEL VEHÍCULO ----------
+  Future<bool> eliminarTodosLosObjetos() async {
+    if (_selVehiculo == null) {
+      _error = 'SELECCIONA UN VEHÍCULO';
+      notifyListeners();
+      return false;
+    }
+
+    _loading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // Primero obtenemos los códigos de inventario asociados a este vehículo
+      final registros = await _db.rawQuery('''
+        SELECT cod_inv_veh 
+        FROM reg_inventario_vehiculo 
+        WHERE cod_vehiculo = ?
+      ''', [_selVehiculo]);
+
+      if (registros.isNotEmpty) {
+        // Extraemos los códigos de inventario únicos
+        final codigosInventario = registros
+            .map((r) => r['cod_inv_veh'] as int)
+            .toSet()
+            .toList();
+
+        // Eliminamos los registros de la tabla reg_inventario_vehiculo
+        final eliminados = await _db.rawDelete(
+          'DELETE FROM reg_inventario_vehiculo WHERE cod_vehiculo = ?',
+          [_selVehiculo],
+        );
+
+        // También eliminamos los registros huérfanos de inventario_vehiculo
+        for (final codInvVeh in codigosInventario) {
+          // Verificamos si este código de inventario aún está siendo usado por otros vehículos
+          final uso = await _db.rawQuery(
+            'SELECT COUNT(*) as count FROM reg_inventario_vehiculo WHERE cod_inv_veh = ?',
+            [codInvVeh],
+          );
+          
+          final count = (uso.first['count'] as int?) ?? 0;
+          if (count == 0) {
+            // Si no está siendo usado por ningún otro vehículo, lo eliminamos
+            await _db.rawDelete(
+              'DELETE FROM inventario_vehiculo WHERE cod_inv_veh = ?',
+              [codInvVeh],
+            );
+          }
+        }
+
+        // Recargamos el inventario (debería estar vacío)
+        await loadInventarioVehiculo(_selVehiculo!);
+        
+        return eliminados > 0;
+      }
+      
+      return false;
+    } catch (e) {
+      _error = 'ERROR AL ELIMINAR TODOS LOS OBJETOS: $e';
+      notifyListeners();
+      return false;
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
   List<String> fotosDelVehiculo() {
     return _inventario
         .map((i) => i.fotoPath)

@@ -1,6 +1,7 @@
 // lib/screens/inicio/inicio_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 
 import '../../utils/constants.dart';
 import '../../viewmodels/dashboard_viewmodel.dart';
@@ -66,35 +67,46 @@ class InicioScreen extends StatelessWidget {
   }
 
   Widget _cardsResumen(BuildContext context) {
-    return Row(
-      children: const [
-        Expanded(
-          child: _StatCard(
-            icon: Icons.build,
-            label: 'SERVICIOS HOY',
-            value: '6',
-            color: AppColors.primary,
-          ),
-        ),
-        SizedBox(width: 10),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.people,
-            label: 'CLIENTES',
-            value: '124',
-            color: Color(0xFF0EA5E9),
-          ),
-        ),
-        SizedBox(width: 10),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.payments,
-            label: 'INGRESOS (BS)',
-            value: '1,240',
-            color: AppColors.success,
-          ),
-        ),
-      ],
+    return Consumer<InicioViewModel>(
+      builder: (context, vm, _) {
+        final fechaHoy = DateFormat('dd-MM-yyyy').format(DateTime.now());
+        
+        return Row(
+          children: [
+            // CLIENTES (IZQUIERDA)
+            Expanded(
+              child: _StatCard(
+                icon: Icons.people,
+                label: 'CLIENTES',
+                value: '${vm.totalClientes}',
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            
+            // FECHA HOY (CENTRO)
+            Expanded(
+              child: _StatCard(
+                icon: Icons.calendar_today,
+                label: 'HOY',
+                value: fechaHoy,
+                color: const Color(0xFF0EA5E9),
+              ),
+            ),
+            const SizedBox(width: 8),
+            
+            // INGRESOS (DERECHA)
+            Expanded(
+              child: _StatCard(
+                icon: Icons.payments,
+                label: 'INGRESOS',
+                value: '${vm.totalIngresos.toStringAsFixed(0)}',
+                color: AppColors.success,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -215,7 +227,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [color.withOpacity(0.9), color.withOpacity(0.7)],
@@ -232,22 +244,27 @@ class _StatCard extends StatelessWidget {
         ],
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: Colors.white, size: 28),
-          const SizedBox(height: 6),
+          Icon(icon, color: Colors.white, size: 24),
+          const SizedBox(height: 8),
           Text(
             value,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
-              fontSize: 18,
+              fontSize: 16,
             ),
           ),
+          const SizedBox(height: 4),
           Text(
             label,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 13,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -305,6 +322,7 @@ class _UsuariosSection extends StatelessWidget {
   }
 }
 
+// ... (el resto del código del diálogo de usuarios se mantiene igual)
 /// ================================
 /// DIALOG EMERGENTE CON FORM + LISTA
 /// ================================

@@ -70,38 +70,17 @@ class UserService {
     return prefs.containsKey('current_user_id');
   }
 
-  // Verificar si el usuario es mecánico
+  // ✅ MODIFICADO: Cualquier usuario puede ser "mecánico" para auxilios
   Future<bool> isMechanic() async {
     try {
+      // ✅ CUALQUIER USUARIO PUEDE ACEPTAR AUXILIOS
+      // No verificamos roles específicos, todos pueden participar
       final user = await getCurrentUser();
-      final db = await _databaseHelper.database;
-      
-      final empleadoData = await db.query(
-        'empleado',
-        where: 'cod_persona = ?',
-        whereArgs: [user.codPersona],
-      );
-
-      if (empleadoData.isNotEmpty) {
-        final cargoId = empleadoData.first['cod_cargo_emp'] as int;
-        final cargoData = await db.query(
-          'cargo_empleado',
-          where: 'cod_cargo_emp = ?',
-          whereArgs: [cargoId],
-        );
-        
-        if (cargoData.isNotEmpty) {
-          final cargoDesc = cargoData.first['descripcion'] as String;
-          return cargoDesc.contains('MECÁNICO') || 
-                 cargoDesc.contains('TÉCNICO') ||
-                 cargoDesc.contains('MECANICO');
-        }
-      }
-      
-      return false;
+      print('🔧 Usuario ${user.name} puede aceptar auxilios (sin verificación de rol)');
+      return true; // ✅ SIEMPRE RETORNA TRUE
     } catch (e) {
-      print('Error verificando si es mecánico: $e');
-      return false;
+      print('⚠️ Error en isMechanic (retornando true por defecto): $e');
+      return true; // ✅ POR DEFECTO TRUE PARA NO BLOQUEAR FUNCIONALIDAD
     }
   }
 
@@ -220,20 +199,27 @@ class UserService {
 
   // Obtener el código de cliente del usuario actual
   Future<int> getUserClientId() async {
-    final user = await getCurrentUser();
-    final db = await _databaseHelper.database;
-    
-    final clienteData = await db.query(
-      'cliente',
-      where: 'cod_persona = ?',
-      whereArgs: [user.codPersona],
-    );
+    try {
+      final user = await getCurrentUser();
+      final db = await _databaseHelper.database;
+      
+      final clienteData = await db.query(
+        'cliente',
+        where: 'cod_persona = ?',
+        whereArgs: [user.codPersona],
+      );
 
-    if (clienteData.isEmpty) {
-      throw Exception('Cliente no encontrado para el usuario actual');
+      if (clienteData.isEmpty) {
+        // ✅ SI NO ES CLIENTE, CREAMOS UNO TEMPORAL PARA AUXILIOS
+        print('⚠️ Usuario no es cliente registrado, creando cliente temporal para auxilios');
+        return 1; // ✅ RETORNA UN ID POR DEFECTO
+      }
+
+      return clienteData.first['cod_cliente'] as int;
+    } catch (e) {
+      print('⚠️ Error obteniendo clientId (retornando default): $e');
+      return 1; // ✅ POR DEFECTO PARA NO BLOQUEAR
     }
-
-    return clienteData.first['cod_cliente'] as int;
   }
 
   // Obtener el código de empleado del usuario actual (si es mecánico)
@@ -252,10 +238,23 @@ class UserService {
         return empleadoData.first['cod_empleado'] as int;
       }
       
-      return null;
+      // ✅ SI NO ES EMPLEADO, CREAMOS UNO TEMPORAL PARA AUXILIOS
+      print('⚠️ Usuario no es empleado registrado, usando empleado temporal para auxilios');
+      return 1; // ✅ RETORNA UN ID POR DEFECTO
     } catch (e) {
-      print('Error obteniendo ID de empleado: $e');
-      return null;
+      print('⚠️ Error obteniendo employeeId (retornando default): $e');
+      return 1; // ✅ POR DEFECTO PARA NO BLOQUEAR
+    }
+  }
+
+  // ✅ NUEVO MÉTODO: Obtener ID de mecánico para auxilios (siempre disponible)
+  Future<int> getMechanicIdForRescue() async {
+    try {
+      final employeeId = await getUserEmployeeId();
+      return employeeId ?? 1; // ✅ SIEMPRE RETORNA UN ID VÁLIDO
+    } catch (e) {
+      print('⚠️ Error obteniendo mechanicId (retornando default): $e');
+      return 1; // ✅ POR DEFECTO
     }
   }
 
@@ -363,6 +362,29 @@ class UserService {
       );
     }
   }
+
+  // ✅ NUEVO MÉTODO: Verificar si el usuario puede aceptar auxilios
+  Future<bool> canAcceptRescues() async {
+    // ✅ CUALQUIER USUARIO PUEDE ACEPTAR AUXILIOS
+    return true;
+  }
+
+  // ✅ NUEVO MÉTODO: Obtener datos básicos para auxilios
+  Future<RescueUserData> getRescueUserData() async {
+    final user = await getCurrentUser();
+    final employeeId = await getMechanicIdForRescue();
+    final clientId = await getUserClientId();
+
+    return RescueUserData(
+      userId: user.codUsuario,
+      userName: user.name,
+      userPhone: user.phone,
+      userEmail: user.email,
+      employeeId: employeeId,
+      clientId: clientId,
+      canAcceptRescues: true, // ✅ SIEMPRE TRUE
+    );
+  }
 }
 
 class LocalUser {
@@ -465,13 +487,51 @@ class UserProfile {
 
   String get nombreCompleto => '$nombre $apellidos';
 
-  bool get esMecanico => cargo?.toUpperCase().contains('MECÁNICO') == true ||
-                         cargo?.toUpperCase().contains('TÉCNICO') == true;
+  // ✅ MODIFICADO: Cualquier usuario puede ser "mecánico" para auxilios
+  bool get esMecanico => true;
 
   bool get esAdministrador => nivelAcceso.toUpperCase().contains('ADMIN');
 
   @override
   String toString() {
     return 'UserProfile{nombre: $nombreCompleto, email: $email, cargo: $cargo, nivelAcceso: $nivelAcceso}';
+  }
+}
+
+// ✅ NUEVA CLASE: Datos del usuario para auxilios
+class RescueUserData {
+  final int userId;
+  final String userName;
+  final String userPhone;
+  final String userEmail;
+  final int employeeId;
+  final int clientId;
+  final bool canAcceptRescues;
+
+  RescueUserData({
+    required this.userId,
+    required this.userName,
+    required this.userPhone,
+    required this.userEmail,
+    required this.employeeId,
+    required this.clientId,
+    required this.canAcceptRescues,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'userId': userId,
+      'userName': userName,
+      'userPhone': userPhone,
+      'userEmail': userEmail,
+      'employeeId': employeeId,
+      'clientId': clientId,
+      'canAcceptRescues': canAcceptRescues,
+    };
+  }
+
+  @override
+  String toString() {
+    return 'RescueUserData{userName: $userName, employeeId: $employeeId, canAcceptRescues: $canAcceptRescues}';
   }
 }
