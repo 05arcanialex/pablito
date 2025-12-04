@@ -62,7 +62,9 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
       _inited = true;
       Future.microtask(() async {
         try {
-          await context.read<UbicacionesViewModel>().init();
+          await context
+              .read<UbicacionesViewModel>()
+              .init(initialCodCliente: widget.codCliente);
         } catch (e) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -109,8 +111,8 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          vm.clienteNombreSel.isEmpty 
-              ? 'UBICACIÓN DEL CLIENTE' 
+          vm.clienteNombreSel.isEmpty
+              ? 'UBICACIÓN DEL CLIENTE'
               : 'UBICACIÓN • ${vm.clienteNombreSel}',
         ),
         backgroundColor: AppColors.primary,
@@ -118,7 +120,9 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
         actions: [
           IconButton(
             onPressed: vm.toggleSeguir,
-            icon: Icon(vm.siguiendo ? Icons.my_location : Icons.location_disabled),
+            icon: Icon(
+              vm.siguiendo ? Icons.my_location : Icons.location_disabled,
+            ),
             tooltip: vm.siguiendo ? 'SEGUIR MI UBICACIÓN' : 'DEJAR DE SEGUIR',
           ),
           IconButton(
@@ -134,6 +138,11 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
             icon: const Icon(Icons.center_focus_strong),
             tooltip: 'CENTRAR EN MI UBICACIÓN',
           ),
+          IconButton(
+            onPressed: vm.loading ? null : () => _showClientSelector(vm),
+            icon: const Icon(Icons.person_search),
+            tooltip: 'SELECCIONAR CLIENTE',
+          ),
         ],
       ),
       body: (vm.loading && pos == null)
@@ -146,7 +155,8 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
                   const Center(
                     child: Text(
                       'OBTENIENDO COORDENADAS...',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
                 _infoCard(vm),
@@ -267,7 +277,7 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
   List<Marker> _buildRescueMarkers(UbicacionesViewModel vm) {
     final markers = <Marker>[];
     final clientPos = _draggedPosition ?? vm.pickedLatLng ?? vm.currentLatLng;
-    
+
     // Marcador del cliente
     if (clientPos != null) {
       markers.add(
@@ -357,7 +367,9 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        vm.direccion.isEmpty ? 'OBTENIENDO DIRECCIÓN...' : vm.direccion,
+                        vm.direccion.isEmpty
+                            ? 'OBTENIENDO DIRECCIÓN...'
+                            : vm.direccion,
                         style: AppTextStyles.body,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -424,7 +436,8 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
           else
             Text(
               'Buscando mecánico disponible...',
-              style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+              style: AppTextStyles.body
+                  .copyWith(color: AppColors.textSecondary),
             ),
           const SizedBox(height: 12),
           ElevatedButton(
@@ -450,9 +463,10 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: (vm.pickedLatLng == null && _draggedPosition == null) 
-                        ? null 
-                        : () => _goMaps(vm),
+                    onPressed:
+                        (vm.pickedLatLng == null && _draggedPosition == null)
+                            ? null
+                            : () => _goMaps(vm),
                     icon: const Icon(Icons.navigation),
                     label: const Text('ABRIR EN MAPS'),
                     style: ElevatedButton.styleFrom(
@@ -501,11 +515,77 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
         ),
       );
 
+  /// DIÁLOGO PARA SELECCIONAR CLIENTE
+  Future<void> _showClientSelector(UbicacionesViewModel vm) async {
+    if (vm.clientes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('NO HAY CLIENTES REGISTRADOS')),
+      );
+      return;
+    }
+
+    int? selectedId = vm.codClienteSel;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('SELECCIONAR CLIENTE'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: vm.clientes.length,
+              itemBuilder: (context, index) {
+                final c = vm.clientes[index];
+                final isSelected = c.id == selectedId;
+                return ListTile(
+                  title: Text(c.nombre),
+                  trailing: isSelected
+                      ? const Icon(
+                          Icons.check,
+                          color: AppColors.success,
+                        )
+                      : null,
+                  onTap: () {
+                    selectedId = c.id;
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('CANCELAR'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (selectedId != null) {
+      await vm.setClienteSeleccionado(selectedId!);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('CLIENTE SELECCIONADO CORRECTAMENTE')),
+      );
+    }
+  }
+
   /// DIÁLOGO PARA SOLICITAR AUXILIO COURRIER
   Future<void> _showRescueDialog(UbicacionesViewModel vm) async {
+    if (vm.codClienteSel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('DEBES SELECCIONAR UN CLIENTE PRIMERO')),
+      );
+      return;
+    }
+
     if (vm.userVehicles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No tienes vehículos registrados')),
+        const SnackBar(content: Text('EL CLIENTE NO TIENE VEHÍCULOS REGISTRADOS')),
       );
       return;
     }
@@ -532,7 +612,8 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
                         labelText: 'Seleccione vehículo',
                         border: OutlineInputBorder(),
                         isDense: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
                       value: selectedVehicleId,
                       items: vm.userVehicles.map((vehicle) {
@@ -551,15 +632,17 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
                           selectedVehicleId = value;
                         });
                       },
-                      isExpanded: true, // IMPORTANTE: Esto evita el overflow
+                      isExpanded: true,
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       decoration: const InputDecoration(
                         labelText: 'Descripción del problema',
                         border: OutlineInputBorder(),
-                        hintText: 'Ej: No enciende el motor, ponchadura de llanta, etc.',
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        hintText:
+                            'Ej: No enciende el motor, ponchadura de llanta, etc.',
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
                       maxLines: 3,
                       onChanged: (value) {
@@ -579,13 +662,15 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
                 onPressed: () async {
                   if (selectedVehicleId == null || problema.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Completa todos los campos')),
+                      const SnackBar(
+                          content: Text('Completa todos los campos')),
                     );
                     return;
                   }
-                  
+
                   Navigator.pop(context);
-                  await _solicitarAuxilioCourrier(vm, selectedVehicleId!, problema);
+                  await _solicitarAuxilioCourrier(
+                      vm, selectedVehicleId!, problema);
                 },
                 child: const Text('SOLICITAR AUXILIO'),
               ),
@@ -597,16 +682,16 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
   }
 
   Future<void> _solicitarAuxilioCourrier(
-    UbicacionesViewModel vm, 
-    int vehicleId, 
-    String problema
+    UbicacionesViewModel vm,
+    int vehicleId,
+    String problema,
   ) async {
     try {
       final rescueId = await vm.solicitarAuxilioCourrier(
         vehicleId: vehicleId,
         problema: problema,
       );
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Auxilio solicitado correctamente (#$rescueId)'),
@@ -615,7 +700,6 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
       );
 
       // El ViewModel automáticamente cambiará a la pantalla de rescate en curso
-      
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -631,7 +715,8 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Cancelar Auxilio'),
-        content: const Text('¿Estás seguro de que quieres cancelar el auxilio en curso?'),
+        content: const Text(
+            '¿Estás seguro de que quieres cancelar el auxilio en curso?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -641,6 +726,7 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
             onPressed: () async {
               Navigator.pop(context);
               await vm.cancelarRescateActual();
+              if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Auxilio cancelado'),
@@ -661,20 +747,21 @@ class _UbicacionesScaffoldState extends State<_UbicacionesScaffold> {
   Future<void> _goMaps(UbicacionesViewModel vm) async {
     final p = _draggedPosition ?? vm.pickedLatLng ?? vm.currentLatLng;
     if (p == null) return;
-    
+
     final uri = Uri.parse(
       Platform.isIOS
           ? 'http://maps.apple.com/?daddr=${p.latitude},${p.longitude}'
           : 'https://www.google.com/maps/dir/?api=1&destination=${p.latitude},${p.longitude}&travelmode=driving',
     );
-    
+
     try {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('NO SE PUDO ABRIR LA APLICACIÓN DE MAPAS')),
+          const SnackBar(
+              content: Text('NO SE PUDO ABRIR LA APLICACIÓN DE MAPAS')),
         );
       }
     } catch (e) {

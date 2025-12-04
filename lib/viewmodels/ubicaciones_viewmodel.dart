@@ -10,9 +10,20 @@ import '../services/user_service.dart' as user_service;
 import '../services/rescue_service.dart';
 import '../services/osrm_service.dart';
 
+/// MODELO SIMPLE PARA LISTAR CLIENTES EN LA UI
+class ClienteResumen {
+  final int id;
+  final String nombre;
+
+  const ClienteResumen({
+    required this.id,
+    required this.nombre,
+  });
+}
+
 class UbicacionesViewModel extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
-  
+
   // CORRECCIÓN: Inicializar en el constructor, no con 'late'
   final user_service.UserService _userService;
   late final courier_service.CourierService _courierService;
@@ -33,9 +44,12 @@ class UbicacionesViewModel extends ChangeNotifier {
   // REGISTRO
   int? _codRegistro;
 
-  // CLIENTE AUTO-DETECTADO
+  // CLIENTE SELECCIONADO
   int? _codClienteSel;
   String? _clienteNombreSel;
+
+  // LISTA DE CLIENTES DISPONIBLES
+  List<ClienteResumen> _clientes = [];
 
   // COURRIER - NUEVAS PROPIEDADES
   String? _currentRescueId;
@@ -44,8 +58,9 @@ class UbicacionesViewModel extends ChangeNotifier {
   List<LatLng>? _routePolyline;
   LatLng? _mechanicLocation;
 
-  // CONSTRUCTOR CORREGIDO
-  UbicacionesViewModel() : _userService = user_service.UserService(DatabaseHelper.instance) {
+  // CONSTRUCTOR
+  UbicacionesViewModel()
+      : _userService = user_service.UserService(DatabaseHelper.instance) {
     // Inicializar CourierService en el constructor
     _courierService = courier_service.CourierService(
       RescueService(),
@@ -61,33 +76,40 @@ class UbicacionesViewModel extends ChangeNotifier {
   LatLng? get currentLatLng => _currentLatLng;
   LatLng? get pickedLatLng => _pickedLatLng;
   bool get siguiendo => _siguiendo;
-  String get direccion => _direccionManual?.trim().isNotEmpty == true ? _direccionManual! : _direccion;
+  String get direccion =>
+      _direccionManual?.trim().isNotEmpty == true ? _direccionManual! : _direccion;
   int? get codRegistro => _codRegistro;
   int? get codClienteSel => _codClienteSel;
   String get clienteNombreSel => _clienteNombreSel ?? 'SIN CLIENTE';
-  
+
+  // LISTA DE CLIENTES PARA LA UI
+  List<ClienteResumen> get clientes => List.unmodifiable(_clientes);
+
   // COURRIER GETTERS
   List<user_service.Vehicle> get userVehicles => _userVehicles;
   List<LatLng>? get routePolyline => _routePolyline;
   LatLng? get mechanicLocation => _mechanicLocation;
   String? get currentRescueId => _currentRescueId;
 
-  // ================= INIT CON COURRIER =================
-  Future<void> init() async {
+  // ================= INIT CON COURRIER + CLIENTE =================
+  Future<void> init({int? initialCodCliente}) async {
     _loading = true;
     _error = null;
     notifyListeners();
 
     try {
-      // ELIMINADO: _initializeServices() - ya no es necesario
-      
       await _ensureAuxilioDDL();
       await _ensurePermisos();
-      await _ensureClienteSeleccionado();
 
-      // Cargar vehículos del usuario
-      await _loadUserVehicles();
+      // CARGAR LISTA DE CLIENTES PARA SELECCIONAR
+      await _loadClientes();
 
+      // SI RECIBE UN CLIENTE INICIAL (POR EJEMPLO DESDE OTRA PANTALLA), LO SELECCIONA
+      if (initialCodCliente != null) {
+        await setClienteSeleccionado(initialCodCliente);
+      }
+
+      // OBTENER POSICIÓN INICIAL
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
@@ -103,23 +125,82 @@ class UbicacionesViewModel extends ChangeNotifier {
     }
   }
 
-  // ELIMINADO: _initializeServices() - ya no es necesario
+  /// CARGAR LISTA COMPLETA DE CLIENTES
+  Future<void> _loadClientes() async {
+    try {
+      final rows = await _db.rawQuery('''
+        SELECT 
+          c.cod_cliente AS cod_cliente,
+          (p.nombre || ' ' || p.apellidos) AS nombre
+        FROM cliente c
+        JOIN persona p ON p.cod_persona = c.cod_persona
+        ORDER BY p.nombre ASC;
+      ''');
+
+      _clientes = rows
+          .map((r) => ClienteResumen(
+                id: (r['cod_cliente'] as int),
+                nombre: (r['nombre'] ?? '') as String,
+              ))
+          .toList();
+    } catch (e) {
+      debugPrint('Error cargando clientes: $e');
+      _clientes = [];
+    }
+  }
+
+  /// SELECCIONAR CLIENTE DESDE LA UI O DESDE PARAMETRO INICIAL
+  Future<void> setClienteSeleccionado(int codCliente) async {
+    _codClienteSel = codCliente;
+
+    // BUSCAR EN LA LISTA YA CARGADA
+    final encontrado =
+        _clientes.where((c) => c.id == codCliente).toList(growable: false);
+    if (encontrado.isNotEmpty) {
+      _clienteNombreSel = encontrado.first.nombre;
+    } else {
+      // FALLBACK: CONSULTAR DIRECTO A BD SI NO ESTÁ EN LA LISTA
+      try {
+        final rows = await _db.rawQuery('''
+          SELECT 
+            (p.nombre || ' ' || p.apellidos) AS nombre
+          FROM cliente c
+          JOIN persona p ON p.cod_persona = c.cod_persona
+          WHERE c.cod_cliente = ?;
+        ''', [codCliente]);
+
+        if (rows.isNotEmpty) {
+          _clienteNombreSel = (rows.first['nombre'] ?? '') as String;
+        } else {
+          _clienteNombreSel = 'CLIENTE DESCONOCIDO';
+        }
+      } catch (e) {
+        debugPrint('Error buscando cliente seleccionado: $e');
+        _clienteNombreSel = 'CLIENTE DESCONOCIDO';
+      }
+    }
+
+    // CARGAR VEHÍCULOS DEL CLIENTE SELECCIONADO
+    await _loadUserVehicles();
+
+    notifyListeners();
+  }
 
   Future<void> _loadUserVehicles() async {
-  try {
-    if (_codClienteSel != null) {
-      print('🔍 Cargando vehículos para cliente: $_codClienteSel');
-      _userVehicles = await _userService.getClientVehicles(_codClienteSel!);
-      print('✅ Vehículos cargados: ${_userVehicles.length}');
-    } else {
+    try {
+      if (_codClienteSel != null) {
+        debugPrint('🔍 Cargando vehículos para cliente: $_codClienteSel');
+        _userVehicles = await _userService.getClientVehicles(_codClienteSel!);
+        debugPrint('✅ Vehículos cargados: ${_userVehicles.length}');
+      } else {
+        _userVehicles = [];
+        debugPrint('⚠️ No hay cliente seleccionado para cargar vehículos');
+      }
+    } catch (e) {
+      debugPrint('Error cargando vehículos: $e');
       _userVehicles = [];
-      print('⚠️ No hay cliente seleccionado para cargar vehículos');
     }
-  } catch (e) {
-    print('Error cargando vehículos: $e');
-    _userVehicles = [];
   }
-}
 
   @override
   void dispose() {
@@ -139,7 +220,7 @@ class UbicacionesViewModel extends ChangeNotifier {
     try {
       final ubicacion = _pickedLatLng ?? _currentLatLng;
       if (ubicacion == null) throw Exception('No hay ubicación seleccionada');
-      
+
       _loading = true;
       notifyListeners();
 
@@ -150,13 +231,13 @@ class UbicacionesViewModel extends ChangeNotifier {
       );
 
       _currentRescueId = rescueId;
-      
+
       // Escuchar actualizaciones del rescate en tiempo real
       _startRescueListener(rescueId);
-      
+
       _loading = false;
       notifyListeners();
-      
+
       return rescueId;
     } catch (e) {
       _loading = false;
@@ -173,28 +254,28 @@ class UbicacionesViewModel extends ChangeNotifier {
         _handleRescueUpdate(rescue);
       },
       onError: (error) {
-        print('Error en stream de rescate: $error');
+        debugPrint('Error en stream de rescate: $error');
         _error = 'Error en seguimiento: $error';
         notifyListeners();
-      }
+      },
     );
   }
 
   void _handleRescueUpdate(courier_service.RescueRequest rescue) {
-    print('Actualización de rescate: ${rescue.status}');
-    
+    debugPrint('Actualización de rescate: ${rescue.status}');
+
     // Actualizar ubicación del mecánico
     if (rescue.mechanicLocation != null) {
       _mechanicLocation = rescue.mechanicLocation;
-      
+
       // Calcular ruta si tenemos ambas ubicaciones
       if (_currentLatLng != null) {
         _calculateRouteToMechanic();
       }
     }
-    
+
     notifyListeners();
-    
+
     // Manejar diferentes estados
     switch (rescue.status) {
       case courier_service.RescueStatus.accepted:
@@ -219,7 +300,7 @@ class UbicacionesViewModel extends ChangeNotifier {
 
   Future<void> _calculateRouteToMechanic() async {
     if (_currentLatLng == null || _mechanicLocation == null) return;
-    
+
     try {
       _routePolyline = await _courierService.calculateRouteToClient(
         _mechanicLocation!,
@@ -227,32 +308,32 @@ class UbicacionesViewModel extends ChangeNotifier {
       );
       notifyListeners();
     } catch (e) {
-      print('Error calculando ruta: $e');
+      debugPrint('Error calculando ruta: $e');
     }
   }
 
   void _onRescueAccepted(courier_service.RescueRequest rescue) {
-    print('Mecánico aceptó el rescate: ${rescue.mechanicId}');
+    debugPrint('Mecánico aceptó el rescate: ${rescue.mechanicId}');
     // Podrías mostrar notificación aquí
   }
 
   void _onMechanicEnRoute(courier_service.RescueRequest rescue) {
-    print('Mecánico en camino');
+    debugPrint('Mecánico en camino');
     // Actualizar UI para mostrar "Mecánico en camino"
   }
 
   void _onMechanicArrived(courier_service.RescueRequest rescue) {
-    print('Mecánico llegó a la ubicación');
+    debugPrint('Mecánico llegó a la ubicación');
     // Mostrar que el mecánico llegó
   }
 
   void _onRescueCompleted(courier_service.RescueRequest rescue) {
-    print('Rescate completado');
+    debugPrint('Rescate completado');
     _cleanupRescue();
   }
 
   void _onRescueCancelled(courier_service.RescueRequest rescue) {
-    print('Rescate cancelado');
+    debugPrint('Rescate cancelado');
     _cleanupRescue();
   }
 
@@ -275,7 +356,7 @@ class UbicacionesViewModel extends ChangeNotifier {
   /// Obtener ETA del mecánico
   Future<Duration?> obtenerETA() async {
     if (_currentLatLng == null || _mechanicLocation == null) return null;
-    
+
     return await _courierService.calculateETA(
       _mechanicLocation!,
       _currentLatLng!,
@@ -283,7 +364,7 @@ class UbicacionesViewModel extends ChangeNotifier {
   }
 
   // ================= MÉTODOS EXISTENTES (MANTENIDOS) =================
-  
+
   Future<void> _ensureAuxilioDDL() async {
     await _db.rawQuery('''
       CREATE TABLE IF NOT EXISTS auxilio_posicion(
@@ -306,36 +387,10 @@ class UbicacionesViewModel extends ChangeNotifier {
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
     }
-    if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
       throw 'PERMISOS DE UBICACIÓN DENEGADOS';
     }
-  }
-
-  Future<void> _ensureClienteSeleccionado() async {
-    final rows = await _db.rawQuery('''
-      SELECT c.cod_cliente, (p.nombre || ' ' || p.apellidos) AS nombre
-      FROM cliente c
-      JOIN persona p ON p.cod_persona = c.cod_persona
-      ORDER BY c.cod_cliente ASC
-      LIMIT 1;
-    ''');
-
-    if (rows.isNotEmpty) {
-      _codClienteSel = rows.first['cod_cliente'] as int;
-      _clienteNombreSel = (rows.first['nombre'] ?? '') as String;
-      return;
-    }
-
-    final idPers = await _db.rawInsert(
-      'INSERT INTO persona(nombre, apellidos, telefono, email) VALUES(?,?,?,?)',
-      ['CLIENTE', 'DEMO', '70000000', 'demo@example.com'],
-    );
-    final idCliente = await _db.rawInsert(
-      'INSERT INTO cliente(cod_persona) VALUES(?)',
-      [idPers],
-    );
-    _codClienteSel = idCliente;
-    _clienteNombreSel = 'CLIENTE DEMO';
   }
 
   void _startPosStream() {
@@ -379,7 +434,8 @@ class UbicacionesViewModel extends ChangeNotifier {
 
   Future<void> _reverseGeocode(LatLng p) async {
     try {
-      final placemarks = await geo.placemarkFromCoordinates(p.latitude, p.longitude);
+      final placemarks =
+          await geo.placemarkFromCoordinates(p.latitude, p.longitude);
       if (placemarks.isNotEmpty) {
         final pm = placemarks.first;
         _direccion =
